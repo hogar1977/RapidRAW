@@ -38,6 +38,18 @@ interface CollageModalState {
   sourceImages: Array<Pick<ImageFile, 'path'>>;
 }
 
+interface PanoramaCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface PanoramaDroppedImage {
+  filename: string;
+  reason: string;
+}
+
 interface PanoramaModalState {
   error: string | null;
   finalImageBase64: string | null;
@@ -45,6 +57,17 @@ interface PanoramaModalState {
   isProcessing: boolean;
   progressMessage: string | null;
   stitchingSourcePaths: Array<string>;
+  overlayBase64: string | null;
+  winnerMapBase64: string | null;
+  dropped: Array<PanoramaDroppedImage>;
+  recommendedProjection: string | null;
+  selectedProjection: string | null;
+  crop: PanoramaCrop | null;
+  previewWidth: number;
+  previewHeight: number;
+  filenames: Array<string>;
+  saveProgressPercent: number | null;
+  saveProgressMessage: string | null;
 }
 
 interface FocusStackModalState {
@@ -347,6 +370,17 @@ export const useUIStore = create<UIState>((set, get) => ({
     isProcessing: false,
     progressMessage: '',
     stitchingSourcePaths: [],
+    overlayBase64: null,
+    winnerMapBase64: null,
+    dropped: [],
+    recommendedProjection: null,
+    selectedProjection: null,
+    crop: null,
+    previewWidth: 0,
+    previewHeight: 0,
+    filenames: [],
+    saveProgressPercent: null,
+    saveProgressMessage: null,
   },
   focusStackModalState: {
     error: null,

@@ -1402,7 +1402,15 @@
       "speedNotice": "Dies kann je nach Anzahl und Größe der Bilder einige Minuten dauern.",
       "start": "Start",
       "stitchingProgress": "Panorama wird zusammengefügt",
-      "title": "Panorama zusammenfügen"
+      "title": "Panorama zusammenfügen",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Neuen Albumnamen eingeben..."

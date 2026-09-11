@@ -885,10 +885,13 @@ pub async fn load_image(
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = None;
         *state.hdr_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        *state
-            .panorama_result
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = None;
+        {
+            let mut guard = state
+                .panorama_session
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            crate::panorama_utils::session::drop_session(&mut guard);
+        }
     }
 
     let (source_path, sidecar_path) = parse_virtual_path(&path);

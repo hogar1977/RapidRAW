@@ -1402,7 +1402,15 @@
       "speedNotice": "Això pot trigar uns minuts depenent del nombre i la mida de les imatges.",
       "start": "Iniciar",
       "stitchingProgress": "S'està unint el panorama",
-      "title": "Unir panorama"
+      "title": "Unir panorama",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Introduïu el nou nom de l'àlbum..."

@@ -255,6 +255,19 @@ export function useTauriListeners({
           });
         }
       }),
+      listen('panorama-save-progress', (event: any) => {
+        if (isEffectActive) {
+          const percent = typeof event.payload?.percent === 'number' ? event.payload.percent : 0;
+          const message = typeof event.payload?.message === 'string' ? event.payload.message : null;
+          useUIStore.getState().setUI((state) => ({
+            panoramaModalState: {
+              ...state.panoramaModalState,
+              saveProgressPercent: Math.max(0, Math.min(100, percent)),
+              saveProgressMessage: message,
+            },
+          }));
+        }
+      }),
       listen('panorama-complete', (event: any) => {
         if (isEffectActive) {
           useUIStore.getState().setUI((state) => ({
@@ -262,8 +275,19 @@ export function useTauriListeners({
               ...state.panoramaModalState,
               error: null,
               finalImageBase64: event.payload.base64,
+              overlayBase64: event.payload.overlayBase64 ?? null,
+              winnerMapBase64: event.payload.winnerMapBase64 ?? null,
+              dropped: event.payload.dropped ?? [],
+              recommendedProjection: event.payload.recommendedProjection ?? null,
+              selectedProjection: event.payload.selectedProjection ?? null,
+              crop: event.payload.crop ?? null,
+              previewWidth: event.payload.previewWidth ?? 0,
+              previewHeight: event.payload.previewHeight ?? 0,
+              filenames: event.payload.filenames ?? [],
               isProcessing: false,
               progressMessage: null,
+              saveProgressPercent: null,
+              saveProgressMessage: null,
             },
           }));
         }
@@ -275,8 +299,12 @@ export function useTauriListeners({
               ...state.panoramaModalState,
               error: String(event.payload),
               finalImageBase64: null,
+              overlayBase64: null,
+              winnerMapBase64: null,
               isProcessing: false,
               progressMessage: null,
+              saveProgressPercent: null,
+              saveProgressMessage: null,
             },
           }));
         }

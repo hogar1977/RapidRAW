@@ -1431,7 +1431,15 @@
       "speedNotice": "Cela peut prendre quelques minutes selon le nombre et la taille des images.",
       "start": "Démarrer",
       "stitchingProgress": "Assemblage du panorama",
-      "title": "Assembler un panorama"
+      "title": "Assembler un panorama",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Saisir le nouveau nom de l'album..."

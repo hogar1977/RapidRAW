@@ -1462,7 +1462,15 @@
       "speedNotice": "Это может занять несколько минут в зависимости от количества снимков и их разрешения.",
       "start": "Начать",
       "stitchingProgress": "Сшивание панорамы",
-      "title": "Сборка панорамы"
+      "title": "Сборка панорамы",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Введите новое название альбома..."

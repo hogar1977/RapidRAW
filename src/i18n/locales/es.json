@@ -1431,7 +1431,15 @@
       "speedNotice": "Esto puede tardar unos minutos dependiendo del número y tamaño de las imágenes.",
       "start": "Iniciar",
       "stitchingProgress": "Uniendo panorama",
-      "title": "Unir panorama"
+      "title": "Unir panorama",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Introduce el nuevo nombre del álbum..."

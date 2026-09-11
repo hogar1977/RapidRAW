@@ -1400,7 +1400,15 @@
       "speedNotice": "这可能需要几分钟，具体取决于图像的数量和大小。",
       "start": "开始",
       "stitchingProgress": "拼接全景图中",
-      "title": "拼接全景图"
+      "title": "拼接全景图",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "输入新的相册名称..."

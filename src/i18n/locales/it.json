@@ -1431,7 +1431,15 @@
       "speedNotice": "L'operazione potrebbe richiedere alcuni minuti a seconda del numero e delle dimensioni delle immagini.",
       "start": "Avvia",
       "stitchingProgress": "Unione Panorama in corso",
-      "title": "Unisci Panorama"
+      "title": "Unisci Panorama",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Inserisci nuovo nome album..."

@@ -114,3 +114,7 @@ strip = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
+[[test]]
+name = "panorama"
+path = "tests/panorama/engine_tests.rs"

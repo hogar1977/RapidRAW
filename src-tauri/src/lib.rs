@@ -34,8 +34,8 @@ mod lut_processing;
 mod mask_generation;
 mod multi_exposure;
 mod negative_conversion;
-mod panorama_stitching;
-mod panorama_utils;
+pub mod panorama_stitching;
+pub mod panorama_utils;
 mod preset_converter;
 mod raw_processing;
 mod tagging;
@@ -1409,6 +1409,23 @@ async fn generate_preview_for_path(
     .map_err(|e| format!("Task execution failed: {}", e))?
 }
 
+struct EglFilteredStderr;
+
+impl std::io::Write for EglFilteredStderr {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Ok(text) = std::str::from_utf8(buf) {
+            if text.contains("eglSwapInterval") || text.contains("eglSwapBuffers") {
+                return Ok(buf.len());
+            }
+        }
+        std::io::stderr().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stderr().flush()
+    }
+}
+
 fn setup_logging(app_handle: &tauri::AppHandle) {
     let log_dir = match app_handle.path().app_log_dir() {
         Ok(dir) => dir,
@@ -1444,7 +1461,15 @@ fn setup_logging(app_handle: &tauri::AppHandle) {
             ))
         })
         .level(level)
-        .chain(std::io::stderr());
+        .filter(|metadata| {
+            let target = metadata.target();
+            let skip_target = target.contains("wgpu_hal")
+                || target.contains("glow")
+                || target.ends_with("::egl")
+                || target.contains("khronos_egl");
+            !skip_target
+        })
+        .chain(Box::new(EglFilteredStderr) as Box<dyn std::io::Write + Send>);
 
     if let Some(file) = log_file {
         dispatch = dispatch.chain(file);
@@ -2064,7 +2089,7 @@ pub fn run() {
             ai_init_lock: TokioMutex::new(()),
             export_task_token: Arc::new(Mutex::new(None)),
             hdr_result: Arc::new(Mutex::new(None)),
-            panorama_result: Arc::new(Mutex::new(None)),
+            panorama_session: Arc::new(Mutex::new(None)),
             focus_stack_result: Arc::new(Mutex::new(None)),
             denoise_result: Arc::new(Mutex::new(None)),
             indexing_task_handle: Mutex::new(None),
@@ -2138,6 +2163,8 @@ pub fn run() {
             image_loader::load_image,
             image_loader::is_image_cached,
             panorama_stitching::stitch_panorama,
+            panorama_stitching::reproject_panorama,
+            panorama_stitching::cancel_panorama,
             panorama_stitching::save_panorama,
             export_processing::export_images,
             export_processing::cancel_export,

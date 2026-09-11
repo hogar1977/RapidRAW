@@ -1400,7 +1400,15 @@
       "speedNotice": "이미지의 개수와 크기에 따라 몇 분이 걸릴 수 있습니다.",
       "start": "시작",
       "stitchingProgress": "파노라마 스티칭 중",
-      "title": "파노라마 스티칭"
+      "title": "파노라마 스티칭",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "새 앨범 이름 입력..."

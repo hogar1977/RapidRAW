@@ -87,6 +87,8 @@ export enum Invokes {
   SaveCollage = 'save_collage',
   SaveDenoisedImage = 'save_denoised_image',
   SavePanorama = 'save_panorama',
+  ReprojectPanorama = 'reproject_panorama',
+  CancelPanorama = 'cancel_panorama',
   SaveHdr = 'save_hdr',
   SavePresets = 'save_presets',
   SaveSettings = 'save_settings',

@@ -1432,7 +1432,15 @@
       "speedNotice": "Isso pode levar alguns minutos dependendo do número e tamanho das imagens.",
       "start": "Iniciar",
       "stitchingProgress": "Montando Panorama",
-      "title": "Montar Panorama"
+      "title": "Montar Panorama",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Digite o novo nome do álbum..."

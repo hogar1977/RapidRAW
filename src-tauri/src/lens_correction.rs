@@ -148,17 +148,17 @@ pub struct MultiName {
     value: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Copy, Debug)]
 pub struct LensDistortionParams {
-    k1: f64,
-    k2: f64,
-    k3: f64,
-    model: u32,
-    tca_vr: f64,
-    tca_vb: f64,
-    vig_k1: f64,
-    vig_k2: f64,
-    vig_k3: f64,
+    pub k1: f64,
+    pub k2: f64,
+    pub k3: f64,
+    pub model: u32,
+    pub tca_vr: f64,
+    pub tca_vb: f64,
+    pub vig_k1: f64,
+    pub vig_k2: f64,
+    pub vig_k3: f64,
 }
 
 fn strip_maker_prefix(name: &str, maker: &str) -> String {

@@ -1,3 +1,4 @@
+// CYBERTIMON: required by hdr_deghosting; do not remove until HDR is migrated.
 use crate::panorama_stitching::{BRIEF_DESCRIPTOR_SIZE, Descriptor, Feature, KeyPoint, Match};
 use image::{GrayImage, ImageBuffer, Luma};
 use imageproc::corners::{Corner, corners_fast9};
@@ -59,6 +60,90 @@ pub fn normalize_grayscale(img: &GrayImage) -> GrayImage {
         let value = img.get_pixel(x, y)[0];
         let stretched = ((value - minimum) as f32 / span * 255.0).round();
         Luma([stretched as u8])
+    })
+}
+
+/// Matching-only contrast boost (CLAHE-lite). Does not affect output color.
+pub fn enhance_for_matching(img: &GrayImage) -> GrayImage {
+    let normalized = normalize_grayscale(img);
+    let (w, h) = normalized.dimensions();
+    if w < 32 || h < 32 {
+        return normalized;
+    }
+    let tiles_x = 8u32;
+    let tiles_y = 8u32;
+    let tw = ((w + tiles_x - 1) / tiles_x).max(8);
+    let th = ((h + tiles_y - 1) / tiles_y).max(8);
+    let clip_limit = 2.5f32;
+
+    let mut maps: Vec<[u8; 256]> = Vec::with_capacity((tiles_x * tiles_y) as usize);
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            let x0 = tx * tw;
+            let y0 = ty * th;
+            let x1 = (x0 + tw).min(w);
+            let y1 = (y0 + th).min(h);
+            let mut hist = [0u32; 256];
+            let mut count = 0u32;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    hist[normalized.get_pixel(x, y)[0] as usize] += 1;
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                maps.push(std::array::from_fn(|i| i as u8));
+                continue;
+            }
+            let clip = ((count as f32 / 256.0) * clip_limit).max(1.0) as u32;
+            let mut excess = 0u32;
+            for hbin in &mut hist {
+                if *hbin > clip {
+                    excess += *hbin - clip;
+                    *hbin = clip;
+                }
+            }
+            let redistribute = excess / 256;
+            let rem = excess % 256;
+            for (i, hbin) in hist.iter_mut().enumerate() {
+                *hbin += redistribute;
+                if (i as u32) < rem {
+                    *hbin += 1;
+                }
+            }
+            let mut cdf = [0u32; 256];
+            cdf[0] = hist[0];
+            for i in 1..256 {
+                cdf[i] = cdf[i - 1] + hist[i];
+            }
+            let cdf_min = cdf.iter().copied().find(|&v| v > 0).unwrap_or(0);
+            let den = (count.saturating_sub(cdf_min)).max(1) as f32;
+            let mut lut = [0u8; 256];
+            for i in 0..256 {
+                let v = ((cdf[i].saturating_sub(cdf_min) as f32 / den) * 255.0).round();
+                lut[i] = v.clamp(0.0, 255.0) as u8;
+            }
+            maps.push(lut);
+        }
+    }
+
+    GrayImage::from_fn(w, h, |x, y| {
+        let fx = (x as f32 / tw as f32).min((tiles_x - 1) as f32);
+        let fy = (y as f32 / th as f32).min((tiles_y - 1) as f32);
+        let x0 = fx.floor() as u32;
+        let y0 = fy.floor() as u32;
+        let x1 = (x0 + 1).min(tiles_x - 1);
+        let y1 = (y0 + 1).min(tiles_y - 1);
+        let dx = fx - x0 as f32;
+        let dy = fy - y0 as f32;
+        let v = normalized.get_pixel(x, y)[0] as usize;
+        let i00 = maps[(y0 * tiles_x + x0) as usize][v] as f32;
+        let i10 = maps[(y0 * tiles_x + x1) as usize][v] as f32;
+        let i01 = maps[(y1 * tiles_x + x0) as usize][v] as f32;
+        let i11 = maps[(y1 * tiles_x + x1) as usize][v] as f32;
+        let top = i00 * (1.0 - dx) + i10 * dx;
+        let bot = i01 * (1.0 - dx) + i11 * dx;
+        Luma([((top * (1.0 - dy) + bot * dy).round()).clamp(0.0, 255.0) as u8])
     })
 }
 

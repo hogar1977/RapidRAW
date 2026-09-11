@@ -1399,10 +1399,19 @@
       "retry": "Retry",
       "save": "Save",
       "savedSuccess": "Panorama Saved Successfully!",
-      "speedNotice": "This may take a few minutes depending on the number and size of images.",
+      "speedNotice": "Alignment, exposure matching, and blending finish before the preview appears. Save only renders the same result at full resolution.",
+      "savingProgress": "Saving… {{percent}}%",
       "start": "Start",
       "stitchingProgress": "Stitching Panorama",
-      "title": "Stitch Panorama"
+      "title": "Stitch Panorama",
+      "projection": "Projection",
+      "recommended": "recommended",
+      "excluded": "Excluded images ({{count}})",
+      "projections": {
+        "spherical": "Spherical",
+        "cylindrical": "Cylindrical",
+        "perspective": "Perspective"
+      }
     },
     "renameAlbum": {
       "placeholder": "Enter new album name..."
