@@ -7,7 +7,10 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
   const setUI = useUIStore((state) => state.setUI);
 
   const handleStartPanorama = useCallback(
-    (paths: string[]) => {
+    (
+      paths: string[],
+      options: { cropFactor: number; focal35: number; estimateIntrinsics: boolean; scale: 'full' | 'half' },
+    ) => {
       setUI((state) => ({
         panoramaModalState: {
           ...state.panoramaModalState,
@@ -20,10 +23,13 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
           progressMessage: 'Starting panorama process...',
         },
       }));
-      invoke(Invokes.StitchPanorama, { paths }).catch((err) => {
-        setUI((state) => ({
-          panoramaModalState: { ...state.panoramaModalState, isProcessing: false, error: String(err) },
-        }));
+      invoke(Invokes.StitchPanorama, { paths, ...options }).catch((err) => {
+        setUI((state) => {
+          if (!state.panoramaModalState.isOpen) return state;
+          return {
+            panoramaModalState: { ...state.panoramaModalState, isProcessing: false, error: String(err) },
+          };
+        });
       });
     },
     [setUI],
@@ -40,9 +46,12 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
         },
       }));
       invoke(Invokes.ReprojectPanorama, { projection }).catch((err) => {
-        setUI((state) => ({
-          panoramaModalState: { ...state.panoramaModalState, isProcessing: false, error: String(err) },
-        }));
+        setUI((state) => {
+          if (!state.panoramaModalState.isOpen) return state;
+          return {
+            panoramaModalState: { ...state.panoramaModalState, isProcessing: false, error: String(err) },
+          };
+        });
       });
     },
     [setUI],

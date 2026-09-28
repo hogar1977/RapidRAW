@@ -1,7 +1,6 @@
-use crate::panorama_utils::projection::Projection;
-use crate::panorama_utils::camera::CameraPose;
-use crate::panorama_utils::local_warp::ImageMesh;
-use image::Rgb32FImage;
+use crate::panorama_utils::v86::geom::Projection;
+use crate::panorama_utils::v86::lens::LensModel;
+use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -21,20 +20,20 @@ pub struct NormalizedCrop {
 
 impl Default for NormalizedCrop {
     fn default() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            width: 1.0,
-            height: 1.0,
-        }
+        Self { x: 0.0, y: 0.0, width: 1.0, height: 1.0 }
     }
 }
 
-#[derive(Debug, Clone)]
+pub struct WorkingFrame {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<f32>,
+}
+
 pub struct PanoramaSession {
     pub source_paths: Vec<String>,
     pub kept_indices: Vec<usize>,
-    pub poses: Vec<CameraPose>,
     pub dropped: Vec<DroppedImage>,
     pub preview_png_base64: String,
     pub overlay_png_base64: String,
@@ -46,10 +45,19 @@ pub struct PanoramaSession {
     pub preview_width: u32,
     pub preview_height: u32,
     pub temp_dir: Option<PathBuf>,
-    pub preview_images: Vec<Rgb32FImage>,
-    pub low_detail_masks: Vec<image::GrayImage>,
-    /// Local CP meshes at preview resolution (global image index).
-    pub local_meshes: Vec<ImageMesh>,
+    pub composite: Vec<f32>,
+    pub composite_width: u32,
+    pub composite_height: u32,
+    pub frames: Vec<WorkingFrame>,
+    pub rotations: Vec<Matrix3<f64>>,
+    pub focal_px: f64,
+    pub focal35: f64,
+    pub lens: LensModel,
+    pub gains: Vec<f64>,
+    pub coef: Vec<f64>,
+    pub pedestal: f64,
+    pub half: bool,
+    pub log_origin: std::time::Instant,
 }
 
 impl PanoramaSession {

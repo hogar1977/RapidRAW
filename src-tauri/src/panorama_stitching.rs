@@ -2,32 +2,28 @@ use crate::app_settings::load_settings;
 use crate::app_state::AppState;
 use crate::file_management::parse_virtual_path;
 use crate::formats::is_raw_file;
-use crate::image_processing::{apply_linear_to_srgb, apply_srgb_to_linear, downscale_f32_image};
-use crate::panorama_utils::auto_crop::max_inscribed_aabb;
-use crate::panorama_utils::blend::blend_panorama;
-use crate::panorama_utils::bundle_adjust::{
-    bundle_adjust, refine_single_row_pitches, refine_single_row_yaws,
-};
-use crate::panorama_utils::local_warp::build_local_meshes;
-use crate::panorama_utils::camera::{
-    enforce_single_row, is_likely_single_row, log_alignment_residuals, pose_from_exif_with_lens,
-    wave_correct, CameraPose, yaw_pitch_from_rotation,
-};
-use crate::panorama_utils::debug_log; // PANO_DEBUG — temporary
-use crate::panorama_utils::match_graph::build_match_graph;
-use crate::panorama_utils::orb::{detect_and_compute, generate_steered_brief_pairs};
+use crate::image_processing::{apply_linear_to_srgb, apply_srgb_to_linear};
+use crate::lens_correction::{find_best_lens_match, resolve_lens_params, CalibrationElement, LensDatabase};
+use crate::panorama_utils::camera::parse_focal_mm_35eq;
 use crate::panorama_utils::overlay::generate_overlay;
-use crate::panorama_utils::processing::generate_low_detail_mask;
-use crate::panorama_utils::projection::{recommend_projection, Projection, ProjectionCanvas};
-use crate::panorama_utils::ram::{check_ram, save_canvas_long_side};
-use crate::panorama_utils::session::{
-    drop_session, DroppedImage, NormalizedCrop, PanoramaSession,
-};
-use base64::{Engine as _, engine::general_purpose};
-use image::{DynamicImage, GenericImageView, GrayImage, ImageFormat, Rgb32FImage};
+use crate::panorama_utils::ram::stitch_memory_budget_bytes;
+use crate::panorama_utils::session::{drop_session, DroppedImage, NormalizedCrop, PanoramaSession, WorkingFrame};
+use crate::panorama_utils::v86::const_::DISPLAY_LONG_SIDE;
+use crate::panorama_utils::v86::geom::Projection;
+use crate::panorama_utils::v86::lens::{LensKind, LensModel};
+use crate::panorama_utils::v86::memory::peak_bytes;
+use crate::panorama_utils::v86::photo::Photo;
+use crate::panorama_utils::v86::stitch::{self, InputFrame, StitchResult};
+use crate::panorama_utils::v86::trace::{self, StitchLog};
+use base64::{engine::general_purpose, Engine as _};
+use image::{DynamicImage, ImageFormat, Rgb32FImage};
+use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
-use std::path::Path;
+use std::io::{Cursor, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 // CYBERTIMON: required by hdr_deghosting; do not remove until HDR is migrated.
@@ -55,54 +51,162 @@ pub struct Match {
     pub index2: usize,
 }
 
-const PREVIEW_LONG_SIDE: u32 = 2800;
-const FEATURE_LONG_SIDE: u32 = 1600;
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LensProbe {
+    full_bytes: u64,
+    half_bytes: u64,
+    limit_bytes: u64,
+    scale: String,
+    size_known: bool,
+    lens_maker: String,
+    lens_model: String,
+    crop_factor: f64,
+    focal35: f64,
+    native_mm: f64,
+    disagreements: Vec<String>,
+    calib_crop: f64,
+}
+
+#[tauri::command]
+pub fn probe_panorama_lenses(paths: Vec<String>, state: tauri::State<'_, AppState>) -> Result<LensProbe, String> {
+    if paths.len() < 2 {
+        return Err("Please select at least two images to stitch.".into());
+    }
+    let lens_db = state.lens_db.lock().unwrap().clone();
+    let mut width = 0u32;
+    let mut height = 0u32;
+    let mut size_known = true;
+    let mut maker = String::new();
+    let mut model = String::new();
+    let mut camera_model = String::new();
+    let mut focal35 = 50.0;
+    let mut natives = Vec::new();
+    for (i, path) in paths.iter().enumerate() {
+        let (real, _) = parse_virtual_path(path);
+        let bytes = fs::read(&real).map_err(|e| format!("Could not read {}: {}", real.display(), e))?;
+        let exif = crate::exif_processing::read_exif_data_from_bytes(real.to_string_lossy().as_ref(), &bytes);
+        if i == 0 {
+            focal35 = parse_focal_mm_35eq(&exif);
+            maker = exif.get("LensMake").or_else(|| exif.get("Make")).cloned().unwrap_or_default();
+            model = exif.get("LensModel").cloned().unwrap_or_default();
+            camera_model = exif.get("Model").cloned().unwrap_or_default();
+        }
+        let native = first_number(exif.get("FocalLength").map(|s| s.as_str()).unwrap_or(""));
+        natives.push((file_name(path), native));
+        match read_size(real.as_path(), &bytes) {
+            Some((w, h)) if i == 0 => {
+                width = w;
+                height = h;
+            }
+            Some(_) => {}
+            None => size_known = false,
+        }
+    }
+    let (limit, _) = stitch_memory_budget_bytes();
+    let (full_bytes, half_bytes, scale) = if size_known && width > 0 && height > 0 {
+        let n = paths.len() as u32;
+        let full = peak_bytes(n, width, height);
+        let half = peak_bytes(n, (width / 2).max(1), (height / 2).max(1));
+        let scale = if full <= limit {
+            "full"
+        } else if half <= limit {
+            "half"
+        } else {
+            "blocked"
+        };
+        (full, half, scale.to_string())
+    } else {
+        (0, 0, "blocked".to_string())
+    };
+    let (lens_maker, lens_model, crop, calib) = lens_summary(lens_db.as_deref(), &maker, &model, &camera_model);
+    let crop = if crop > 0.0 { crop } else { 1.0 };
+    let native_mm = focal35 / crop;
+    let mut disagreements = Vec::new();
+    for (name, native) in natives {
+        if let Some(mm) = native {
+            if (mm - native_mm).abs() > 0.5 {
+                disagreements.push(format!("{name}: {mm:.1} mm vs {native_mm:.1} mm"));
+            }
+        }
+    }
+    Ok(LensProbe {
+        full_bytes,
+        half_bytes,
+        limit_bytes: limit,
+        scale,
+        size_known,
+        lens_maker,
+        lens_model,
+        crop_factor: crop,
+        focal35,
+        native_mm,
+        disagreements,
+        calib_crop: calib,
+    })
+}
 
 #[tauri::command]
 pub async fn stitch_panorama(
     paths: Vec<String>,
+    crop_factor: f64,
+    focal35: f64,
+    estimate_intrinsics: bool,
+    scale: String,
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     if paths.len() < 2 {
         return Err("Please select at least two images to stitch.".to_string());
     }
-
-    let source_paths: Vec<String> = paths
-        .iter()
-        .map(|p| parse_virtual_path(p).0.to_string_lossy().into_owned())
-        .collect();
-
+    let source_paths: Vec<String> = paths.iter().map(|p| parse_virtual_path(p).0.to_string_lossy().into_owned()).collect();
     let session_handle = state.panorama_session.clone();
     let lens_db = state.lens_db.lock().unwrap().clone();
-
+    let stop = arm_stop(&state);
+    let log_path = pano_log_path(&source_paths[0]);
+    let log = StitchLog::create(&log_path, stop.clone())?;
+    log.line(&format!("merge started files={} scale={scale}", source_paths.len()));
     let task = tokio::task::spawn_blocking(move || {
-        match run_preview_pipeline(source_paths, app_handle.clone(), lens_db) {
+        let _guard = trace::install(log);
+        if trace::halted() {
+            trace::note_stop();
+            return Ok(());
+        }
+        match run_stitch(&source_paths, crop_factor, focal35, estimate_intrinsics, &scale, &app_handle, lens_db) {
             Ok(session) => {
-                let payload = serde_json::json!({
-                    "base64": session.preview_png_base64.clone(),
-                    "overlayBase64": format!("data:image/png;base64,{}", session.overlay_png_base64),
-                    "winnerMapBase64": format!("data:image/png;base64,{}", session.winner_map_png_base64),
-                    "dropped": session.dropped,
-                    "recommendedProjection": session.recommended_projection.as_str(),
-                    "selectedProjection": session.selected_projection.as_str(),
-                    "crop": session.crop,
-                    "previewWidth": session.preview_width,
-                    "previewHeight": session.preview_height,
-                    "filenames": session.filenames,
-                });
-                *session_handle.lock().unwrap() = Some(session);
+                let payload = complete_payload(&session);
+                {
+                    let mut slot = session_handle.lock().unwrap();
+                    if trace::halted() {
+                        drop_session(&mut slot);
+                        trace::note_stop();
+                        return Ok(());
+                    }
+                    *slot = Some(session);
+                }
+                if trace::halted() {
+                    if let Ok(mut slot) = session_handle.try_lock() {
+                        drop_session(&mut slot);
+                    }
+                    trace::note_stop();
+                    return Ok(());
+                }
+                trace::line("preview ready");
                 let _ = app_handle.emit("panorama-complete", payload);
                 Ok(())
             }
+            Err(e) if e == "stopped" || trace::halted() => {
+                trace::note_stop();
+                Ok(())
+            }
             Err(e) => {
+                trace::line(&format!("failed: {e}"));
                 log::error!("Panorama failed:\n{}", e);
                 let _ = app_handle.emit("panorama-error", e.clone());
                 Err(e)
             }
         }
     });
-
     match task.await {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(e),
@@ -111,41 +215,63 @@ pub async fn stitch_panorama(
 }
 
 #[tauri::command]
-pub async fn reproject_panorama(
-    projection: String,
-    app_handle: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let proj = Projection::parse(&projection)
-        .ok_or_else(|| format!("Unknown projection: {}", projection))?;
-
+pub async fn reproject_panorama(projection: String, app_handle: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let proj = Projection::parse(&projection).ok_or_else(|| format!("Unknown projection: {}", projection))?;
     let session_handle = state.panorama_session.clone();
+    let stop = arm_stop(&state);
+    let log_path = {
+        let guard = state.panorama_session.lock().unwrap();
+        guard.as_ref().and_then(|session| session.source_paths.first().map(|p| pano_log_path(p)))
+    };
+    let log = match log_path {
+        Some(path) => StitchLog::append(&path, stop.clone())?,
+        None => return Err("No panorama session. Run stitch first.".into()),
+    };
+    log.line(&format!("reproject {projection}"));
     let task = tokio::task::spawn_blocking(move || {
+        let _guard = trace::install(log);
+        if trace::halted() {
+            trace::note_stop();
+            return Ok(());
+        }
         let mut guard = session_handle.lock().unwrap();
-        let session = guard
-            .as_mut()
-            .ok_or_else(|| "No panorama session. Run stitch first.".to_string())?;
-
+        let session = guard.as_mut().ok_or_else(|| "No panorama session. Run stitch first.".to_string())?;
         session.selected_projection = proj;
         let _ = app_handle.emit("panorama-progress", "Reprojecting preview...");
-        rebuild_preview(session)?;
-
-        let payload = serde_json::json!({
-            "base64": session.preview_png_base64.clone(),
-            "overlayBase64": format!("data:image/png;base64,{}", session.overlay_png_base64),
-            "winnerMapBase64": format!("data:image/png;base64,{}", session.winner_map_png_base64),
-            "dropped": session.dropped,
-            "recommendedProjection": session.recommended_projection.as_str(),
-            "selectedProjection": session.selected_projection.as_str(),
-            "crop": session.crop,
-            "previewWidth": session.preview_width,
-            "previewHeight": session.preview_height,
-            "filenames": session.filenames,
-        });
+        let frames: Vec<InputFrame> = session.frames.iter().map(|f| InputFrame { name: f.name.clone(), width: f.width, height: f.height, rgb: f.rgb.clone() }).collect();
+        let preview = stitch::shrink_frames(&frames, crate::panorama_utils::v86::const_::DISPLAY_LONG_SIDE);
+        let scale = preview[0].width as f64 / frames[0].width.max(1) as f64;
+        let photo = Photo { gains: session.gains.clone(), coef: session.coef.clone(), pedestal: session.pedestal };
+        let rendered = match stitch::rerender(
+            &preview,
+            &session.rotations,
+            &session.kept_indices,
+            &session.lens,
+            session.focal_px * scale,
+            session.focal35,
+            &photo,
+            proj,
+            session.recommended_projection,
+            session.half,
+            &|msg| { let _ = app_handle.emit("panorama-progress", msg); },
+        ) {
+            Ok(rendered) => rendered,
+            Err(e) if e == "stopped" || trace::halted() => {
+                trace::note_stop();
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+        if trace::halted() {
+            trace::note_stop();
+            return Ok(());
+        }
+        fill_preview(session, &rendered)?;
+        let payload = complete_payload(session);
+        trace::line("preview ready");
         let _ = app_handle.emit("panorama-complete", payload);
         Ok(())
     });
-
     match task.await {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(e),
@@ -155,35 +281,68 @@ pub async fn reproject_panorama(
 
 #[tauri::command]
 pub async fn cancel_panorama(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let mut guard = state.panorama_session.lock().unwrap();
-    drop_session(&mut guard);
+    state.panorama_stop.lock().unwrap().store(true, Ordering::SeqCst);
+    if let Ok(mut guard) = state.panorama_session.try_lock() {
+        drop_session(&mut guard);
+    }
     Ok(())
 }
 
+fn arm_stop(state: &AppState) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut slot = state.panorama_stop.lock().unwrap();
+    slot.store(true, Ordering::SeqCst);
+    *slot = flag.clone();
+    flag
+}
+
+fn pano_log_path(first: &str) -> PathBuf {
+    let (path, _) = parse_virtual_path(first);
+    let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("panorama");
+    parent.join(format!("{stem}_Pano.pano.log"))
+}
+
 #[tauri::command]
-pub async fn save_panorama(
-    first_path_str: String,
-    crop: Option<NormalizedCrop>,
-    state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
-    let session = {
+pub async fn save_panorama(first_path_str: String, crop: Option<NormalizedCrop>, state: tauri::State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let stop = arm_stop(&state);
+    let session_slot = state.panorama_session.clone();
+    let mut session = {
         let mut guard = state.panorama_session.lock().unwrap();
-        guard
-            .take()
-            .ok_or_else(|| "No panorama session found to save.".to_string())?
+        guard.take().ok_or_else(|| "No panorama session found to save.".to_string())?
     };
-
+    let log_path = match session.source_paths.first() {
+        Some(path) => pano_log_path(path),
+        None => {
+            if let Ok(mut guard) = session_slot.lock() {
+                *guard = Some(session);
+            }
+            return Err("No panorama session found to save.".to_string());
+        }
+    };
+    let log = match StitchLog::append_since(&log_path, stop, session.log_origin) {
+        Ok(log) => log,
+        Err(err) => {
+            if let Ok(mut guard) = session_slot.lock() {
+                *guard = Some(session);
+            }
+            return Err(err);
+        }
+    };
     let crop = crop.unwrap_or(session.crop.clone());
-    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-
     let task = tokio::task::spawn_blocking(move || {
-        let result = save_full_res(&session, &first_path_str, &crop, &settings, app_handle);
+        let _guard = trace::install(log);
+        trace::line("save started");
+        let result = save_composite(&mut session, &first_path_str, &crop, &app_handle);
+        match &result {
+            Ok(_) => {}
+            Err(e) if e == "stopped" || trace::halted() => trace::note_stop(),
+            Err(e) => trace::line(&format!("failed: {e}")),
+        }
         let mut session = session;
         session.clear_temps();
         result
     });
-
     match task.await {
         Ok(Ok(path)) => Ok(path),
         Ok(Err(e)) => Err(e),
@@ -191,809 +350,461 @@ pub async fn save_panorama(
     }
 }
 
-fn run_preview_pipeline(
-    source_paths: Vec<String>,
-    app_handle: AppHandle,
-    lens_db: Option<std::sync::Arc<crate::lens_correction::LensDatabase>>,
+fn run_stitch(
+    source_paths: &[String],
+    crop_factor: f64,
+    focal35: f64,
+    estimate: bool,
+    scale: &str,
+    app: &AppHandle,
+    lens_db: Option<std::sync::Arc<LensDatabase>>,
 ) -> Result<PanoramaSession, String> {
-    // PANO_DEBUG — one file per stitch, next to first source image.
-    let dbg = debug_log::PanoDebugLog::start(&source_paths);
-    if let Some(ref d) = dbg {
-        let _ = app_handle.emit(
-            "panorama-progress",
-            format!("Debug log → {}", d.path_str()),
-        );
+    let (w, h) = header_size(&source_paths[0])?;
+    let n = source_paths.len() as u32;
+    let (limit, _) = stitch_memory_budget_bytes();
+    let full = peak_bytes(n, w, h);
+    let half_need = peak_bytes(n, (w / 2).max(1), (h / 2).max(1));
+    let half = if scale == "half" || (scale == "full" && full > limit && half_need <= limit) {
+        true
+    } else if full <= limit && scale != "half" {
+        false
+    } else if half_need <= limit {
+        true
+    } else {
+        return Err("Not enough memory to stitch these photos.".into());
+    };
+    if half && scale == "full" {
+        let _ = app.emit("panorama-progress", "Using half size so the stitch fits in memory.");
     }
-    debug_log::log_paths(&source_paths);
-    debug_log::write(&format!(
-        "lens_db_loaded={}",
-        lens_db.is_some()
-    ));
-
-    let result = run_preview_pipeline_inner(source_paths, app_handle, lens_db);
-    match &result {
-        Ok(session) => {
-            debug_log::write(&format!(
-                "session ok: kept={} dropped={} preview={}x{} proj={} png_b64_len={}",
-                session.kept_indices.len(),
-                session.dropped.len(),
-                session.preview_width,
-                session.preview_height,
-                session.selected_projection.as_str(),
-                session.preview_png_base64.len()
-            ));
-            if let Some(ref d) = dbg {
-                d.finish("ok");
-            }
-        }
-        Err(e) => {
-            debug_log::write(&format!("ERROR: {}", e));
-            if let Some(ref d) = dbg {
-                d.finish("error");
-            } else {
-                debug_log::clear_current();
-            }
-        }
-    }
-    result
-}
-
-fn run_preview_pipeline_inner(
-    source_paths: Vec<String>,
-    app_handle: AppHandle,
-    lens_db: Option<std::sync::Arc<crate::lens_correction::LensDatabase>>,
-) -> Result<PanoramaSession, String> {
-    let settings = load_settings(app_handle.clone()).unwrap_or_default();
-    let _ = app_handle.emit("panorama-progress", "[1/6] Loading images...");
-    debug_log::section("LOAD");
-
-    let mut preview_images: Vec<Rgb32FImage> = Vec::new();
-    let mut low_detail_masks: Vec<GrayImage> = Vec::new();
-    let mut poses: Vec<CameraPose> = Vec::new();
-    let mut feature_grays: Vec<GrayImage> = Vec::new();
-    let mut full_dims: Vec<(u32, u32)> = Vec::new();
-
+    let settings = load_settings(app.clone()).unwrap_or_default();
+    let mut frames = Vec::new();
+    let mut gains_ev = Vec::new();
+    let mut exif0 = HashMap::new();
     for (i, path) in source_paths.iter().enumerate() {
-        let name = Path::new(path)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let _ = app_handle.emit(
-            "panorama-progress",
-            format!("[1/6] Loading {}/{}: {}", i + 1, source_paths.len(), name),
-        );
-
-        let (img, pose, gray_feat, low_mask, dims) =
-            load_linear_frame(path, &settings, lens_db.as_deref())?;
-        log::info!(
-            "Panorama loaded {}: {}x{}, fov_focal_px={:.1}",
-            name,
-            dims.0,
-            dims.1,
-            pose.focal_px
-        );
-        debug_log::write(&format!(
-            "loaded[{}] {} full={}x{} focal_px={:.2} lens=k1={:.5} k2={:.5} k3={:.5} model={} rot={:?}",
-            i,
-            name,
-            dims.0,
-            dims.1,
-            pose.focal_px,
-            pose.lens.k1,
-            pose.lens.k2,
-            pose.lens.k3,
-            pose.lens.model,
-            pose.rotation_vector
-        ));
-        debug_log::log_rgb32f_stats(&format!("linear_full[{}]", i), &img);
-        debug_log::log_gray_stats(&format!("feature_gray_full[{}]", i), &gray_feat);
-
-        let (pw, ph, _) =
-            crate::panorama_utils::processing::calculate_downscale_dimensions_capped(
-                dims.0,
-                dims.1,
-                PREVIEW_LONG_SIDE,
-            );
-        let preview = downscale_f32_image(&DynamicImage::ImageRgb32F(img), pw, ph);
-        let preview_rgb = match preview {
-            DynamicImage::ImageRgb32F(v) => v,
-            other => other.to_rgb32f(),
-        };
-        debug_log::log_rgb32f_stats(&format!("preview_linear[{}]", i), &preview_rgb);
-
-        let (fw, fh, _) =
-            crate::panorama_utils::processing::calculate_downscale_dimensions_capped(
-                dims.0,
-                dims.1,
-                FEATURE_LONG_SIDE,
-            );
-        let gray_small = image::imageops::resize(
-            &gray_feat,
-            fw,
-            fh,
-            image::imageops::FilterType::Triangle,
-        );
-
-        full_dims.push(dims);
-        poses.push(pose.with_scaled_size(fw, fh));
-        preview_images.push(preview_rgb);
-        low_detail_masks.push(image::imageops::resize(
-            &low_mask,
-            preview_images.last().unwrap().width(),
-            preview_images.last().unwrap().height(),
-            image::imageops::FilterType::Nearest,
-        ));
-        feature_grays.push(gray_small);
-        debug_log::write(&format!(
-            "scales[{}]: preview={}x{} feature={}x{} pose_focal={:.2}",
-            i,
-            preview_images[i].width(),
-            preview_images[i].height(),
-            feature_grays[i].width(),
-            feature_grays[i].height(),
-            poses[i].focal_px
-        ));
-    }
-
-    let max_w = full_dims.iter().map(|d| d.0).max().unwrap_or(1);
-    let max_h = full_dims.iter().map(|d| d.1).max().unwrap_or(1);
-    let est_canvas_w = (max_w as f64 * source_paths.len() as f64 * 0.6).ceil() as u32;
-    let est_canvas_h = max_h;
-    let ram = check_ram(
-        max_w,
-        max_h,
-        source_paths.len(),
-        est_canvas_w.max(PREVIEW_LONG_SIDE),
-        est_canvas_h.max(PREVIEW_LONG_SIDE / 2),
-    );
-    debug_log::write(&format!(
-        "ram can_proceed={} est_canvas={}x{} msg={:?}",
-        ram.can_proceed, est_canvas_w, est_canvas_h, ram.message
-    ));
-    if !ram.can_proceed {
-        return Err(format!(
-            "[ram] {}",
-            ram.message.unwrap_or_else(|| "Insufficient RAM".into())
-        ));
-    }
-
-    let _ = app_handle.emit("panorama-progress", "[2/6] Detecting features...");
-    debug_log::section("FEATURES");
-    let pairs = generate_steered_brief_pairs();
-    let features: Vec<_> = feature_grays
-        .iter()
-        .enumerate()
-        .map(|(i, g)| {
-            let feats = detect_and_compute(g, &pairs);
-            log::info!(
-                "Panorama ORB {}: {} features on {}x{}",
-                Path::new(&source_paths[i])
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                feats.len(),
-                g.width(),
-                g.height()
-            );
-            debug_log::write(&format!(
-                "orb[{}] count={} on {}x{}",
-                i,
-                feats.len(),
-                g.width(),
-                g.height()
-            ));
-            feats
-        })
-        .collect();
-
-    let weak_feat: Vec<_> = features
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| f.len() < 20)
-        .map(|(i, f)| {
-            format!(
-                "{} ({} feats)",
-                Path::new(&source_paths[i])
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                f.len()
-            )
-        })
-        .collect();
-    if !features.is_empty() && weak_feat.len() == features.len() {
-        return Err(format!(
-            "[features] Almost no keypoints found in any image: {}. Images may be too soft, blurry, or low-contrast.",
-            weak_feat.join(", ")
-        ));
-    }
-
-    let _ = app_handle.emit("panorama-progress", "[3/6] Matching images...");
-    debug_log::section("MATCH GRAPH");
-    let graph = build_match_graph(&features, &poses, &source_paths, Some(&feature_grays));
-    debug_log::write(&format!(
-        "edges={} kept={:?} dropped={:?} adjacent_only_gba={}",
-        graph.edges.len(),
-        graph.kept,
-        graph.dropped,
-        graph.adjacent_only_gba
-    ));
-    for line in graph.diagnostics.lines() {
-        debug_log::write(line);
-    }
-    if graph.kept.len() < 2 {
-        return Err(format!(
-            "[match] Could not connect at least two images.\n\nDiagnostics:\n{}",
-            graph.diagnostics
-        ));
-    }
-
-    let dropped: Vec<DroppedImage> = graph
-        .dropped
-        .iter()
-        .map(|(idx, reason)| DroppedImage {
-            filename: Path::new(&source_paths[*idx])
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| source_paths[*idx].clone()),
-            reason: reason.clone(),
-        })
-        .collect();
-
-    let _ = app_handle.emit("panorama-progress", "[4/6] Optimizing camera poses...");
-    debug_log::section("POSE OPTIMIZE");
-    let gba_edges: Vec<_> = if graph.adjacent_only_gba {
-        graph
-            .edges
-            .iter()
-            .filter(|e| e.i.abs_diff(e.j) == 1)
-            .cloned()
-            .collect()
-    } else {
-        graph.edges.clone()
-    };
-    log::info!(
-        "Panorama GBA using {} edges (adjacent_only={})",
-        gba_edges.len(),
-        graph.adjacent_only_gba
-    );
-    debug_log::write(&format!(
-        "gba_edges={} adjacent_only={}",
-        gba_edges.len(),
-        graph.adjacent_only_gba
-    ));
-    if graph.adjacent_only_gba {
-        // 1×N: keep yaw-chain init; free SO(3) BA often trades FOV error into pitch,
-        // then pitch-share undoes it and leaves windowblind ridge steps.
-        for &idx in &graph.kept {
-            if let Some(r) = graph.initial_rotations.get(&idx) {
-                poses[idx].set_rotation(*r);
-            }
+        trace::gate()?;
+        let name = file_name(path);
+        let _ = app.emit("panorama-progress", format!("Loading {}/{}: {}", i + 1, source_paths.len(), name));
+        let (rgb, fw, fh, exif) = load_linear(path, &settings)?;
+        if i == 0 {
+            exif0 = exif.clone();
         }
-        let mean_focal =
-            graph.kept.iter().map(|&i| poses[i].focal_px).sum::<f64>() / graph.kept.len() as f64;
-        for &idx in &graph.kept {
-            poses[idx].focal_px = mean_focal;
-        }
-        debug_log::write(&format!("1xN path: yaw-chain init, mean_focal={:.2}", mean_focal));
-    } else {
-        bundle_adjust(
-            &mut poses,
-            &features,
-            &gba_edges,
-            &graph.kept,
-            &graph.initial_rotations,
-        );
-        debug_log::write("multi-row path: free SO(3) bundle_adjust done");
-    }
-    // OpenCV-style waveCorrect: horizontal for 1×N, vertical if pitch span dominates.
-    let yaw_span = {
-        let mut yaws: Vec<f64> = graph
-            .kept
-            .iter()
-            .map(|&i| yaw_pitch_from_rotation(&poses[i].rotation()).0)
-            .collect();
-        yaws.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        yaws.last().copied().unwrap_or(0.0) - yaws.first().copied().unwrap_or(0.0)
-    };
-    let pitch_span = {
-        let mut pitches: Vec<f64> = graph
-            .kept
-            .iter()
-            .map(|&i| yaw_pitch_from_rotation(&poses[i].rotation()).1)
-            .collect();
-        pitches.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        pitches.last().copied().unwrap_or(0.0) - pitches.first().copied().unwrap_or(0.0)
-    };
-    let horizontal_wave = yaw_span.abs() >= pitch_span.abs();
-    debug_log::write(&format!(
-        "waveCorrect horizontal={} yaw_span={:.3}° pitch_span={:.3}°",
-        horizontal_wave,
-        yaw_span.to_degrees(),
-        pitch_span.to_degrees()
-    ));
-    wave_correct(&mut poses, &graph.kept, horizontal_wave);
-    let single_row = is_likely_single_row(&poses, &graph.kept);
-    debug_log::write(&format!("is_likely_single_row={}", single_row));
-    enforce_single_row(&mut poses, &graph.kept);
-
-    if graph.adjacent_only_gba {
-        // 1×N: yaw-chain from pairwise rotations is the trustworthy global pose.
-        // Pixel-transfer yaw polish collapses the span under parallax (v5/v6 regressions).
-        // Re-apply chain yaws after leveling so waveCorrect cannot shrink the pan.
-        if let Some(&anchor) = graph.kept.iter().next() {
-            let (_, shared_pitch) = yaw_pitch_from_rotation(&poses[anchor].rotation());
-            let mean_focal =
-                graph.kept.iter().map(|&i| poses[i].focal_px).sum::<f64>() / graph.kept.len() as f64;
-            for &idx in &graph.kept {
-                let yaw = graph
-                    .initial_rotations
-                    .get(&idx)
-                    .map(|r| yaw_pitch_from_rotation(r).0)
-                    .unwrap_or(0.0);
-                poses[idx].set_rotation(crate::panorama_utils::camera::rotation_from_yaw_pitch(
-                    yaw,
-                    shared_pitch,
-                ));
-                poses[idx].focal_px = mean_focal;
-            }
-        }
-        debug_log::write("1xN: kept yaw-chain (skipped transfer yaw polish)");
-        refine_single_row_pitches(&mut poses, &features, &gba_edges, &graph.kept);
-        debug_log::write("1xN: pitch polish done");
-    } else if single_row {
-        refine_single_row_yaws(&mut poses, &features, &gba_edges, &graph.kept);
-        wave_correct(&mut poses, &graph.kept, true);
-        enforce_single_row(&mut poses, &graph.kept);
-        refine_single_row_yaws(&mut poses, &features, &gba_edges, &graph.kept);
-        debug_log::write("single-row yaw polish (2 passes) done");
-    }
-    log_alignment_residuals(&poses, &features, &gba_edges, &graph.kept);
-
-    // Local CP mesh — only when global residuals are already in a usable band.
-    // Large meshes on a bad global pose amplify tearing (v6).
-    debug_log::section("LOCAL MESH");
-    let mut local_meshes: Vec<crate::panorama_utils::local_warp::ImageMesh> = poses
-        .iter()
-        .map(|p| crate::panorama_utils::local_warp::ImageMesh::identity(p.width, p.height))
-        .collect();
-    let transfer_ok = {
-        // Quick adjacent transfer median; skip mesh if still catastrophic.
-        use std::collections::HashSet;
-        let kept_set: HashSet<usize> = graph.kept.iter().copied().collect();
-        let mut errs = Vec::new();
-        for e in &gba_edges {
-            if !kept_set.contains(&e.i) || !kept_set.contains(&e.j) {
-                continue;
-            }
-            for &(ia, ib) in e.inliers.iter().take(40) {
-                if ia >= features[e.i].len() || ib >= features[e.j].len() {
-                    continue;
-                }
-                let ka = features[e.i][ia].keypoint;
-                let kb = features[e.j][ib].keypoint;
-                let wa = poses[e.i].world_bearing_from_pixel(ka.x as f64, ka.y as f64);
-                if let Some((x, y)) = poses[e.j].pixel_from_world_bearing(wa) {
-                    let dx = x - kb.x as f64;
-                    let dy = y - kb.y as f64;
-                    errs.push((dx * dx + dy * dy).sqrt());
-                }
-            }
-        }
-        if errs.is_empty() {
-            true
+        gains_ev.push(exposure_value(&exif));
+        let (rgb, fw, fh) = if half {
+            let img = Rgb32FImage::from_raw(fw, fh, rgb).ok_or_else(|| "Could not read pixels.".to_string())?;
+            let sw = (fw / 2).max(1);
+            let sh = (fh / 2).max(1);
+            let small = image::imageops::resize(&img, sw, sh, image::imageops::FilterType::Triangle);
+            (small.into_raw(), sw, sh)
         } else {
-            errs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let med = errs[errs.len() / 2];
-            debug_log::write(&format!("mesh_gate transfer_median={:.2}px", med));
-            med < 120.0
-        }
+            (rgb, fw, fh)
+        };
+        frames.push(InputFrame { name: name.clone(), width: fw, height: fh, rgb });
+        trace::line(&format!("loaded {}/{} {name} {fw}x{fh} half={half}", i + 1, source_paths.len()));
+    }
+    apply_exposure(&mut frames, &gains_ev);
+    let (mut lens, calib, crops) = build_lens(lens_db.as_deref(), &exif0, crop_factor, estimate);
+    if !estimate {
+        lens.k = if crop_factor.abs() < 1e-9 { 1.0 } else { calib / crop_factor };
+    }
+    let progress = |msg: &str| {
+        let _ = app.emit("panorama-progress", msg.to_string());
     };
-    if transfer_ok {
-        local_meshes = build_local_meshes(&poses, &features, &gba_edges, &graph.kept);
-    } else {
-        debug_log::write("local_mesh skipped (transfer residuals too large)");
-    }
-
-    for &idx in &graph.kept {
-        let (yaw, pitch) = yaw_pitch_from_rotation(&poses[idx].rotation());
-        debug_log::write(&format!(
-            "pose_feature_res[{}] yaw={:.3}° pitch={:.3}° focal={:.2} size={}x{}",
-            idx,
-            yaw.to_degrees(),
-            pitch.to_degrees(),
-            poses[idx].focal_px,
-            poses[idx].width,
-            poses[idx].height
-        ));
-    }
-
-    for &idx in &graph.kept {
-        let (fw, _, _) = crate::panorama_utils::processing::calculate_downscale_dimensions_capped(
-            full_dims[idx].0,
-            full_dims[idx].1,
-            FEATURE_LONG_SIDE,
-        );
-        let scale = preview_images[idx].width() as f64 / fw as f64;
-        poses[idx].focal_px *= scale;
-        poses[idx].width = preview_images[idx].width();
-        poses[idx].height = preview_images[idx].height();
-        local_meshes[idx] = local_meshes[idx].scaled(poses[idx].width, poses[idx].height);
-        debug_log::write(&format!(
-            "pose_preview_res[{}] scale={:.4} focal={:.2} size={}x{}",
-            idx,
-            scale,
-            poses[idx].focal_px,
-            poses[idx].width,
-            poses[idx].height
-        ));
-    }
-
-    let kept_poses: Vec<CameraPose> = graph.kept.iter().map(|&i| poses[i]).collect();
-    let recommended = recommend_projection(&kept_poses);
-    debug_log::write(&format!("recommended_projection={}", recommended.as_str()));
-
-    let filenames: Vec<String> = graph
-        .kept
-        .iter()
-        .map(|&i| {
-            Path::new(&source_paths[i])
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| source_paths[i].clone())
-        })
-        .collect();
-
+    trace::line(&format!(
+        "lens crop={crop_factor:.3} focal35={focal35:.1} estimate={estimate} calib={calib:.3}"
+    ));
+    let rendered = stitch::stitch(&frames, lens, focal35, estimate, &crops, calib, half, &progress)?;
+    trace::line(&format!(
+        "composite {}x{} kept={} dropped={}",
+        rendered.width,
+        rendered.height,
+        rendered.kept.len(),
+        rendered.dropped.len()
+    ));
     let mut session = PanoramaSession {
-        source_paths,
-        kept_indices: graph.kept,
-        poses,
-        dropped,
+        source_paths: source_paths.to_vec(),
+        kept_indices: rendered.kept.clone(),
+        dropped: rendered.dropped.iter().map(|(filename, reason)| DroppedImage { filename: filename.clone(), reason: reason.clone() }).collect(),
         preview_png_base64: String::new(),
         overlay_png_base64: String::new(),
         winner_map_png_base64: String::new(),
-        filenames,
-        recommended_projection: recommended,
-        selected_projection: recommended,
-        crop: NormalizedCrop::default(),
+        filenames: rendered.kept.iter().filter_map(|&i| frames.get(i).map(|f| f.name.clone())).collect(),
+        recommended_projection: rendered.recommended,
+        selected_projection: rendered.used,
+        crop: NormalizedCrop { x: rendered.crop_x, y: rendered.crop_y, width: rendered.crop_w, height: rendered.crop_h },
         preview_width: 0,
         preview_height: 0,
         temp_dir: None,
-        preview_images,
-        low_detail_masks,
-        local_meshes,
+        composite: rendered.rgb.clone(),
+        composite_width: rendered.width,
+        composite_height: rendered.height,
+        frames: frames.into_iter().map(|f| WorkingFrame { name: f.name, width: f.width, height: f.height, rgb: f.rgb }).collect(),
+        rotations: rendered.rotations.clone(),
+        focal_px: rendered.focal_px,
+        focal35: rendered.focal35,
+        lens: rendered.lens,
+        gains: rendered.photo.gains.clone(),
+        coef: rendered.photo.coef.clone(),
+        pedestal: rendered.photo.pedestal,
+        half,
+        log_origin: trace::started().unwrap_or_else(std::time::Instant::now),
     };
-
-    // Preview uses the same exposure match + distance blend as Save; Save only re-renders at full res.
-    let _ = app_handle.emit(
-        "panorama-progress",
-        "[5/6] Matching exposure & blending preview...",
-    );
-    debug_log::section("PREVIEW BLEND");
-    rebuild_preview(&mut session).map_err(|e| format!("[preview] {}", e))?;
-    let _ = app_handle.emit("panorama-progress", "[6/6] Preview ready");
+    fill_preview(&mut session, &rendered)?;
     Ok(session)
 }
 
-fn rebuild_preview(session: &mut PanoramaSession) -> Result<(), String> {
-    let kept_poses: Vec<CameraPose> = session
-        .kept_indices
-        .iter()
-        .map(|&i| session.poses[i])
-        .collect();
-    let canvas =
-        ProjectionCanvas::from_poses(&kept_poses, session.selected_projection, PREVIEW_LONG_SIDE);
-    debug_log::write(&format!(
-        "canvas {}x{} proj={} hfov={:.3}° vfov={:.3}°",
-        canvas.width,
-        canvas.height,
-        canvas.projection.as_str(),
-        canvas.hfov.to_degrees(),
-        canvas.vfov.to_degrees()
-    ));
-
-    let images: Vec<&Rgb32FImage> = session
-        .kept_indices
-        .iter()
-        .map(|&i| &session.preview_images[i])
-        .collect();
-    let masks: Vec<&GrayImage> = session
-        .kept_indices
-        .iter()
-        .map(|&i| &session.low_detail_masks[i])
-        .collect();
-
-    for (li, &idx) in session.kept_indices.iter().enumerate() {
-        debug_log::log_rgb32f_stats(&format!("blend_input[{}->local{}]", idx, li), images[li]);
-    }
-
-    let blend = blend_panorama(
-        &images,
-        &masks,
-        &session.poses,
-        &session.kept_indices,
-        &canvas,
-        Some(&session.local_meshes),
-        None,
-    );
-
-    debug_log::log_rgb32f_stats("blend_linear_out", &blend.image);
-    debug_log::log_gray_stats("blend_mask", &blend.mask);
-    let win_valid = blend.winners.iter().filter(|&&w| w != u16::MAX).count();
-    debug_log::write(&format!(
-        "winners: valid={}/{} unique={:?}",
-        win_valid,
-        blend.winners.len(),
-        {
-            let mut u: Vec<u16> = blend
-                .winners
-                .iter()
-                .copied()
-                .filter(|&w| w != u16::MAX)
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            u.sort_unstable();
-            u
-        }
-    ));
-
-    session.crop = max_inscribed_aabb(&blend.mask);
-    session.preview_width = canvas.width;
-    session.preview_height = canvas.height;
-    debug_log::write(&format!(
-        "crop x={:.4} y={:.4} w={:.4} h={:.4}",
-        session.crop.x, session.crop.y, session.crop.width, session.crop.height
-    ));
-
-    let overlay = generate_overlay(&blend.winners, canvas.width, canvas.height)?;
-    session.overlay_png_base64 = general_purpose::STANDARD.encode(&overlay.boundary_png);
-    session.winner_map_png_base64 = general_purpose::STANDARD.encode(&overlay.winner_map_png);
-
-    let display = apply_linear_to_srgb(DynamicImage::ImageRgb32F(blend.image));
-    debug_log::log_dynamic_stats("preview_after_linear_to_srgb", &display);
-    session.preview_png_base64 = encode_preview_png(&display)?;
-    debug_log::write(&format!(
-        "preview_png_base64_len={}",
-        session.preview_png_base64.len()
-    ));
+fn fill_preview(session: &mut PanoramaSession, rendered: &StitchResult) -> Result<(), String> {
+    session.composite = rendered.rgb.clone();
+    session.composite_width = rendered.width;
+    session.composite_height = rendered.height;
+    session.crop = NormalizedCrop { x: rendered.crop_x, y: rendered.crop_y, width: rendered.crop_w, height: rendered.crop_h };
+    session.selected_projection = rendered.used;
+    session.filenames = rendered.kept.iter().filter_map(|&i| session.frames.get(i).map(|f| f.name.clone())).collect();
+    let (dw, dh) = display_size(rendered.width, rendered.height);
+    let img = Rgb32FImage::from_raw(rendered.width, rendered.height, rendered.rgb.clone()).ok_or_else(|| "Could not build preview.".to_string())?;
+    let small = image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Lanczos3);
+    let display = apply_linear_to_srgb(DynamicImage::ImageRgb32F(small));
+    session.preview_png_base64 = encode_png(&display.to_rgb8())?;
+    let winners = resize_winners(&rendered.winners, rendered.width, rendered.height, dw, dh);
+    let overlay = generate_overlay(&winners, dw, dh)?;
+    session.overlay_png_base64 = general_purpose::STANDARD.encode(overlay.boundary_png);
+    session.winner_map_png_base64 = general_purpose::STANDARD.encode(overlay.winner_map_png);
+    session.preview_width = dw;
+    session.preview_height = dh;
     Ok(())
 }
 
-fn emit_save_progress(app: &AppHandle, percent: u32, message: &str) {
-    let _ = app.emit(
-        "panorama-save-progress",
-        serde_json::json!({
-            "percent": percent.min(100),
-            "message": message,
-        }),
-    );
-}
-
-fn save_full_res(
-    session: &PanoramaSession,
-    first_path_str: &str,
-    crop: &NormalizedCrop,
-    settings: &crate::app_settings::AppSettings,
-    app_handle: AppHandle,
-) -> Result<String, String> {
-    let n = session.kept_indices.len().max(1);
-    emit_save_progress(&app_handle, 1, "Preparing full-resolution save...");
-
-    let mut full_images: Vec<Rgb32FImage> = Vec::new();
-    let mut full_masks: Vec<GrayImage> = Vec::new();
-    let mut full_poses = session.poses.clone();
-
-    for (step, &idx) in session.kept_indices.iter().enumerate() {
-        let path = &session.source_paths[idx];
-        let name = Path::new(path)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        // Reload phase: 2% .. 38%
-        let pct = 2 + ((step as u32 * 36) / n as u32);
-        emit_save_progress(
-            &app_handle,
-            pct,
-            &format!("Reloading {}/{}: {}", step + 1, n, name),
-        );
-        // Pose/lens already come from the preview session; no need to re-resolve lensfun here.
-        let (img, _pose, gray, low_mask, dims) = load_linear_frame(path, settings, None)?;
-        let scale = dims.0 as f64 / session.poses[idx].width as f64;
-        full_poses[idx].focal_px = session.poses[idx].focal_px * scale;
-        full_poses[idx].width = dims.0;
-        full_poses[idx].height = dims.1;
-        full_poses[idx].rotation_vector = session.poses[idx].rotation_vector;
-        full_poses[idx].lens = session.poses[idx].lens;
-        full_images.push(img);
-        full_masks.push(low_mask);
-        let _ = gray;
-    }
-
-    emit_save_progress(&app_handle, 40, "Building projection canvas...");
-
-    let kept_poses: Vec<CameraPose> = session
-        .kept_indices
-        .iter()
-        .map(|&i| full_poses[i])
-        .collect();
-    let long_side = save_canvas_long_side(&kept_poses, session.selected_projection);
-    let canvas =
-        ProjectionCanvas::from_poses(&kept_poses, session.selected_projection, long_side.max(2000));
-    debug_log::write(&format!(
-        "save_canvas {}x{} long_side={} proj={} hfov={:.3}° vfov={:.3}°",
-        canvas.width,
-        canvas.height,
-        long_side,
-        canvas.projection.as_str(),
-        canvas.hfov.to_degrees(),
-        canvas.vfov.to_degrees()
-    ));
-
-    let ram = check_ram(
-        full_poses[session.kept_indices[0]].width,
-        full_poses[session.kept_indices[0]].height,
-        session.kept_indices.len(),
-        canvas.width,
-        canvas.height,
-    );
-    debug_log::write(&format!(
-        "save_ram can_proceed={} est_mb={} budget_mb={} msg={:?}",
-        ram.can_proceed,
-        ram.estimated_bytes / (1024 * 1024),
-        ram.available_bytes / (1024 * 1024),
-        ram.message
-    ));
-    if !ram.can_proceed {
-        return Err(ram.message.unwrap_or_else(|| "Insufficient RAM".into()));
-    }
-
-    let images: Vec<&Rgb32FImage> = full_images.iter().collect();
-    let masks: Vec<&GrayImage> = full_masks.iter().collect();
-    let local_indices: Vec<usize> = (0..session.kept_indices.len()).collect();
-    let poses_for_blend: Vec<CameraPose> = session
-        .kept_indices
-        .iter()
-        .map(|&i| full_poses[i])
-        .collect();
-    let meshes_for_blend: Vec<_> = session
-        .kept_indices
-        .iter()
-        .map(|&i| {
-            let m = &session.local_meshes[i];
-            m.scaled(full_poses[i].width, full_poses[i].height)
+fn save_composite(session: &mut PanoramaSession, first_path_str: &str, crop: &NormalizedCrop, app: &AppHandle) -> Result<String, String> {
+    let mut frames: Vec<InputFrame> = session
+        .frames
+        .iter_mut()
+        .map(|f| InputFrame {
+            name: f.name.clone(),
+            width: f.width,
+            height: f.height,
+            rgb: std::mem::take(&mut f.rgb),
         })
         .collect();
-
-    // Blend phase: 42% .. 88%
-    let mut last_emitted = 0u32;
-    let mut blend_progress = |frac: f32, msg: &str| {
-        let pct = 42 + (frac.clamp(0.0, 1.0) * 46.0) as u32;
-        if pct >= last_emitted + 1 || frac >= 1.0 {
-            last_emitted = pct;
-            emit_save_progress(&app_handle, pct, msg);
-        }
+    let progress = |msg: &str| {
+        let _ = app.emit("panorama-save-progress", serde_json::json!({ "percent": 5, "message": msg }));
     };
-
-    let blend = blend_panorama(
-        &images,
-        &masks,
-        &poses_for_blend,
-        &local_indices,
-        &canvas,
-        Some(&meshes_for_blend),
-        Some(&mut blend_progress),
+    let _ = app.emit("panorama-save-progress", serde_json::json!({ "percent": 5, "message": "Rendering full resolution..." }));
+    let rendered = stitch::compose(
+        &frames,
+        &session.rotations,
+        &session.kept_indices,
+        session.lens,
+        session.focal_px,
+        session.focal35,
+        session.selected_projection,
+        session.half,
+        &progress,
     );
-
-    emit_save_progress(&app_handle, 90, "Cropping & converting color...");
-
-    let x0 = (crop.x * canvas.width as f64).round().max(0.0) as u32;
-    let y0 = (crop.y * canvas.height as f64).round().max(0.0) as u32;
-    let cw = (crop.width * canvas.width as f64)
-        .round()
-        .max(1.0)
-        .min((canvas.width - x0) as f64) as u32;
-    let ch = (crop.height * canvas.height as f64)
-        .round()
-        .max(1.0)
-        .min((canvas.height - y0) as f64) as u32;
-
-    let cropped = image::imageops::crop_imm(&blend.image, x0, y0, cw, ch).to_image();
-    let display = apply_linear_to_srgb(DynamicImage::ImageRgb32F(cropped));
+    for (dst, src) in session.frames.iter_mut().zip(frames.iter_mut()) {
+        if dst.rgb.is_empty() {
+            dst.rgb = std::mem::take(&mut src.rgb);
+        }
+    }
+    let rendered = rendered?;
+    let _ = app.emit("panorama-save-progress", serde_json::json!({ "percent": 10, "message": "Cropping panorama..." }));
+    trace::line(&format!("save crop {}x{}", rendered.width, rendered.height));
+    let w = rendered.width;
+    let h = rendered.height;
+    let x0 = (crop.x * w as f64).round().clamp(0.0, w as f64) as u32;
+    let y0 = (crop.y * h as f64).round().clamp(0.0, h as f64) as u32;
+    let x1 = ((crop.x + crop.width) * w as f64).round().clamp(x0 as f64 + 1.0, w as f64) as u32;
+    let y1 = ((crop.y + crop.height) * h as f64).round().clamp(y0 as f64 + 1.0, h as f64) as u32;
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut cropped = vec![0f32; (cw as usize) * (ch as usize) * 3];
+    for y in 0..ch {
+        for x in 0..cw {
+            let s = (((y0 + y) * w + (x0 + x)) * 3) as usize;
+            let d = ((y * cw + x) * 3) as usize;
+            cropped[d] = rendered.rgb[s];
+            cropped[d + 1] = rendered.rgb[s + 1];
+            cropped[d + 2] = rendered.rgb[s + 2];
+        }
+    }
+    let _ = app.emit("panorama-save-progress", serde_json::json!({ "percent": 70, "message": "Encoding image..." }));
+    trace::line(&format!("save encode {cw}x{ch}"));
+    let img = Rgb32FImage::from_raw(cw, ch, cropped).ok_or_else(|| "Could not crop the panorama.".to_string())?;
+    let display = apply_linear_to_srgb(DynamicImage::ImageRgb32F(img));
     let rgb16 = display.to_rgb16();
-
-    emit_save_progress(&app_handle, 95, "Writing TIFF...");
-
+    let _ = app.emit("panorama-save-progress", serde_json::json!({ "percent": 95, "message": "Writing TIFF..." }));
     let (first_path, _) = parse_virtual_path(first_path_str);
-    let parent_dir = first_path
-        .parent()
-        .ok_or_else(|| "Could not determine parent directory.".to_string())?;
-    let stem = first_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("panorama");
-    let output_path = parent_dir.join(format!("{}_Pano.tiff", stem));
-
-    rgb16
-        .save_with_format(&output_path, ImageFormat::Tiff)
-        .map_err(|e| format!("Failed to save panorama: {}", e))?;
-
+    let parent_dir = first_path.parent().ok_or_else(|| "Could not determine parent directory.".to_string())?;
+    let stem = first_path.file_stem().and_then(|s| s.to_str()).unwrap_or("panorama");
+    let output_path = parent_dir.join(format!("{stem}_Pano.tiff"));
+    rgb16.save_with_format(&output_path, ImageFormat::Tiff).map_err(|e| format!("Failed to save panorama: {}", e))?;
     let (real_path, _) = parse_virtual_path(first_path_str);
     let _ = crate::exif_processing::write_rrexif_sidecar(&real_path.to_string_lossy(), &output_path);
-
-    emit_save_progress(&app_handle, 100, "Save complete");
-
+    trace::line(&format!("saved {}", output_path.display()));
+    let _ = app.emit("panorama-save-progress", serde_json::json!({ "percent": 100, "message": "Save complete" }));
     Ok(output_path.to_string_lossy().to_string())
 }
 
-fn load_linear_frame(
-    path: &str,
-    settings: &crate::app_settings::AppSettings,
-    lens_db: Option<&crate::lens_correction::LensDatabase>,
-) -> Result<(Rgb32FImage, CameraPose, GrayImage, GrayImage, (u32, u32)), String> {
-    let file_bytes = fs::read(path).map_err(|e| {
-        format!(
-            "[load] Failed to read image {}: {}",
-            Path::new(path)
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string()),
-            e
-        )
-    })?;
-    let mut dynamic = crate::image_loader::load_base_image_from_bytes(
-        &file_bytes,
-        path,
-        false,
-        settings,
-        None,
-    )
-    .map_err(|e| {
-        format!(
-            "[load] Failed to decode {}: {}",
-            Path::new(path)
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string()),
-            e
-        )
-    })?;
+fn complete_payload(session: &PanoramaSession) -> serde_json::Value {
+    serde_json::json!({
+        "base64": session.preview_png_base64.clone(),
+        "overlayBase64": format!("data:image/png;base64,{}", session.overlay_png_base64),
+        "winnerMapBase64": format!("data:image/png;base64,{}", session.winner_map_png_base64),
+        "dropped": session.dropped,
+        "recommendedProjection": session.recommended_projection.as_str(),
+        "selectedProjection": session.selected_projection.as_str(),
+        "crop": session.crop,
+        "previewWidth": session.preview_width,
+        "previewHeight": session.preview_height,
+        "filenames": session.filenames,
+    })
+}
 
+fn load_linear(path: &str, settings: &crate::app_settings::AppSettings) -> Result<(Vec<f32>, u32, u32, HashMap<String, String>), String> {
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read {}: {}", file_name(path), e))?;
+    let exif = crate::exif_processing::read_exif_data_from_bytes(path, &bytes);
+    if let Some((rgb, w, h)) = prepared_linear(path) {
+        trace::line(&format!("prepared {} {w}x{h}", file_name(path)));
+        return Ok((rgb, w, h, exif));
+    }
+    let mut dynamic = crate::image_loader::load_base_image_from_bytes(&bytes, path, false, settings, None)
+        .map_err(|e| format!("Failed to decode {}: {}", file_name(path), e))?;
     if !is_raw_file(path) {
         dynamic = apply_srgb_to_linear(dynamic);
     }
-
-    let dims = dynamic.dimensions();
-    let exif = crate::exif_processing::read_exif_data_from_bytes(path, &file_bytes);
-    let pose = pose_from_exif_with_lens(&exif, dims.0, dims.1, lens_db);
-    debug_log::write(&format!(
-        "exif_focal path={} FocalLength={:?} FocalLengthIn35mmFilm={:?} ScaleFactor35efl={:?} => focal_px={:.2}",
-        Path::new(path)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        exif.get("FocalLength"),
-        exif.get("FocalLengthIn35mmFilm"),
-        exif.get("ScaleFactor35efl")
-            .or_else(|| exif.get("ScaleFactor35Efl")),
-        pose.focal_px
-    ));
-
-    let display = apply_linear_to_srgb(dynamic.clone());
-    let gray_raw = image::imageops::colorops::grayscale(&display.to_rgb8());
-    let gray = crate::panorama_utils::processing::enhance_for_matching(&gray_raw);
-    let low = generate_low_detail_mask(&gray);
-    Ok((dynamic.to_rgb32f(), pose, gray, low, dims))
+    let rgb = dynamic.to_rgb32f();
+    let (w, h) = rgb.dimensions();
+    Ok((rgb.into_raw(), w, h, exif))
 }
 
-fn encode_preview_png(image: &DynamicImage) -> Result<String, String> {
+// Reads a float picture from PANORAMA_LINEAR_DIR when that folder is set.
+fn prepared_linear(path: &str) -> Option<(Vec<f32>, u32, u32)> {
+    let dir = std::env::var("PANORAMA_LINEAR_DIR").ok()?;
+    let name = file_name(path);
+    let stem = Path::new(&name).file_stem()?.to_string_lossy();
+    let bytes = fs::read(Path::new(&dir).join(format!("{stem}.f32"))).ok()?;
+    if bytes.len() < 8 {
+        return None;
+    }
+    let w = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
+    let h = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
+    let count = (w as usize).checked_mul(h as usize)?.checked_mul(3)?;
+    if bytes.len() != 8 + count * 4 {
+        return None;
+    }
+    let rgb = bytes[8..].chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    Some((rgb, w, h))
+}
+
+fn apply_exposure(frames: &mut [InputFrame], evs: &[Option<f64>]) {
+    let mut known: Vec<f64> = evs.iter().filter_map(|v| *v).filter(|v| *v > 0.0).collect();
+    if known.is_empty() {
+        return;
+    }
+    known.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let ref_ev = known[known.len() / 2];
+    for (frame, ev) in frames.iter_mut().zip(evs.iter()) {
+        let Some(ev) = ev.filter(|v| *v > 0.0) else { continue };
+        let g = (ref_ev / ev) as f32;
+        for p in frame.rgb.iter_mut() {
+            *p *= g;
+        }
+    }
+}
+
+fn exposure_value(exif: &HashMap<String, String>) -> Option<f64> {
+    let shutter = exif.get("ExposureTime").and_then(|s| parse_shutter(s))?;
+    let iso = exif.get("PhotographicSensitivity").or_else(|| exif.get("ISOSpeed")).and_then(|s| first_number(s))?;
+    let fnum = exif.get("FNumber").or_else(|| exif.get("ApertureValue")).and_then(|s| first_number(s))?;
+    if fnum <= 0.0 {
+        return None;
+    }
+    Some(shutter * iso / (fnum * fnum))
+}
+
+fn build_lens(db: Option<&LensDatabase>, exif: &HashMap<String, String>, crop_factor: f64, estimate: bool) -> (LensModel, f64, Vec<f64>) {
+    let Some(db) = db else {
+        return (LensModel::identity(), crop_factor.max(1.0), Vec::new());
+    };
+    let maker = exif.get("LensMake").or_else(|| exif.get("Make")).map(|s| s.as_str()).unwrap_or("");
+    let model = exif.get("LensModel").map(|s| s.as_str()).unwrap_or("");
+    let camera = exif.get("Model").map(|s| s.as_str()).unwrap_or("");
+    let Some((lmaker, lmodel)) = find_best_lens_match(db, maker, model, camera) else {
+        return (LensModel::identity(), 1.0, Vec::new());
+    };
+    let native = first_number(exif.get("FocalLength").map(|s| s.as_str()).unwrap_or("")).unwrap_or(parse_focal_mm_35eq(exif)) as f32;
+    let aperture = exif.get("FNumber").and_then(|s| first_number(s)).map(|v| v as f32);
+    let mut lens = LensModel::identity();
+    if let Some(params) = resolve_lens_params(db, &lmaker, &lmodel, native, aperture, None) {
+        if params.model == 1 {
+            lens.kind = LensKind::PtLens;
+            lens.a = params.k1;
+            lens.b = params.k2;
+            lens.c = params.k3;
+        } else if params.k1.abs() + params.k2.abs() + params.k3.abs() > 0.0 {
+            lens.kind = LensKind::Poly3;
+            lens.a = params.k1;
+        }
+        lens.vig_k1 = params.vig_k1;
+        lens.vig_k2 = params.vig_k2;
+        lens.vig_k3 = params.vig_k3;
+        lens.has_vig = params.vig_k1.abs() + params.vig_k2.abs() + params.vig_k3.abs() > 1e-8;
+    }
+    if let Some(vig) = vig_at_longest_distance(db, &lmaker, &lmodel, native) {
+        lens.vig_k1 = vig.0;
+        lens.vig_k2 = vig.1;
+        lens.vig_k3 = vig.2;
+        lens.has_vig = vig.0.abs() + vig.1.abs() + vig.2.abs() > 1e-8;
+    }
+    let calib = lens_crop(db, &lmaker, &lmodel).unwrap_or(1.0);
+    let cam = camera_crop(db, exif.get("Make").map(|s| s.as_str()).unwrap_or(""), camera).unwrap_or(calib);
+    let mut crops = vec![calib, cam];
+    crops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    crops.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+    if !estimate {
+        lens.k = if crop_factor.abs() < 1e-9 { 1.0 } else { calib / crop_factor };
+    } else {
+        lens.k = if cam.abs() < 1e-9 { 1.0 } else { calib / cam };
+    }
+    (lens, calib, crops)
+}
+
+fn lens_summary(db: Option<&LensDatabase>, maker: &str, model: &str, camera: &str) -> (String, String, f64, f64) {
+    let Some(db) = db else {
+        return (String::new(), String::new(), 1.0, 1.0);
+    };
+    let Some((lmaker, lmodel)) = find_best_lens_match(db, maker, model, camera) else {
+        let crop = camera_crop(db, maker, camera).unwrap_or(1.0);
+        return (String::new(), String::new(), crop, crop);
+    };
+    let calib = lens_crop(db, &lmaker, &lmodel).unwrap_or(1.0);
+    let crop = camera_crop(db, maker, camera).unwrap_or(calib);
+    (lmaker, lmodel, crop, calib)
+}
+
+fn lens_crop(db: &LensDatabase, maker: &str, model: &str) -> Option<f64> {
+    let lenses = db.lenses.iter().filter(|l| l.get_maker().eq_ignore_ascii_case(maker)).collect::<Vec<_>>();
+    lenses.iter().find(|l| l.get_display_name(&lenses) == model).and_then(|l| l.cropfactor).map(|v| v as f64)
+}
+
+fn camera_crop(db: &LensDatabase, maker: &str, model: &str) -> Option<f64> {
+    db.cameras.iter().find(|c| c.get_maker().eq_ignore_ascii_case(maker) && c.get_model().eq_ignore_ascii_case(model)).map(|c| c.cropfactor as f64)
+}
+
+fn vig_at_longest_distance(db: &LensDatabase, maker: &str, model: &str, focal: f32) -> Option<(f64, f64, f64)> {
+    let lenses = db.lenses.iter().filter(|l| l.get_maker().eq_ignore_ascii_case(maker)).collect::<Vec<_>>();
+    let lens = lenses.iter().find(|l| l.get_display_name(&lenses) == model)?;
+    let vigs: Vec<_> = lens.calibration.as_ref()?.elements.iter().filter_map(|e| match e {
+        CalibrationElement::Vignetting(v) => Some(v),
+        _ => None,
+    }).collect();
+    if vigs.is_empty() {
+        return None;
+    }
+    let best_f = vigs.iter().min_by(|a, b| (a.focal - focal).abs().partial_cmp(&(b.focal - focal).abs()).unwrap_or(std::cmp::Ordering::Equal))?.focal;
+    let group: Vec<_> = vigs.into_iter().filter(|v| (v.focal - best_f).abs() < 0.05).collect();
+    let best = group.iter().max_by(|a, b| a.distance.unwrap_or(0.0).partial_cmp(&b.distance.unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal))?;
+    Some((best.k1.unwrap_or(0.0) as f64, best.k2.unwrap_or(0.0) as f64, best.k3.unwrap_or(0.0) as f64))
+}
+
+fn header_size(path: &str) -> Result<(u32, u32), String> {
+    let (real, _) = parse_virtual_path(path);
+    let bytes = fs::read(&real).map_err(|e| e.to_string())?;
+    read_size(real.as_path(), &bytes).ok_or_else(|| "Image size is unknown.".into())
+}
+
+fn read_size(path: &Path, bytes: &[u8]) -> Option<(u32, u32)> {
+    if let Ok(dim) = image::image_dimensions(path) {
+        if dim.0 > 0 && dim.1 > 0 {
+            return Some(dim);
+        }
+    }
+    let exif = crate::exif_processing::read_exif(bytes)?;
+    let w = exif_uint(&exif, exif::Tag::PixelXDimension).or_else(|| exif_uint(&exif, exif::Tag::ImageWidth))?;
+    let h = exif_uint(&exif, exif::Tag::PixelYDimension).or_else(|| exif_uint(&exif, exif::Tag::ImageLength))?;
+    if w == 0 || h == 0 { None } else { Some((w, h)) }
+}
+
+fn exif_uint(exif: &exif::Exif, tag: exif::Tag) -> Option<u32> {
+    let field = exif.get_field(tag, exif::In::PRIMARY).or_else(|| exif.get_field(tag, exif::In::THUMBNAIL))?;
+    field.value.get_uint(0).map(|v| v as u32)
+}
+
+fn display_size(w: u32, h: u32) -> (u32, u32) {
+    let long = w.max(h).max(1);
+    if long <= DISPLAY_LONG_SIDE {
+        return (w.max(1), h.max(1));
+    }
+    let s = DISPLAY_LONG_SIDE as f64 / long as f64;
+    (((w as f64) * s).round().max(1.0) as u32, ((h as f64) * s).round().max(1.0) as u32)
+}
+
+fn resize_winners(src: &[u16], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u16> {
+    let mut out = vec![u16::MAX; (dw as usize) * (dh as usize)];
+    for y in 0..dh {
+        let sy = ((y as u64 * sh as u64) / dh as u64) as u32;
+        for x in 0..dw {
+            let sx = ((x as u64 * sw as u64) / dw as u64) as u32;
+            out[(y * dw + x) as usize] = src[(sy * sw + sx) as usize];
+        }
+    }
+    out
+}
+
+fn encode_png(img: &image::RgbImage) -> Result<String, String> {
     let mut buf = Cursor::new(Vec::new());
-    image
-        .to_rgb8()
-        .write_to(&mut buf, ImageFormat::Png)
-        .map_err(|e| format!("Failed to encode panorama preview: {}", e))?;
-    Ok(format!(
-        "data:image/png;base64,{}",
-        general_purpose::STANDARD.encode(buf.get_ref())
-    ))
+    img.write_to(&mut buf, ImageFormat::Png).map_err(|e| format!("Failed to encode panorama preview: {}", e))?;
+    Ok(format!("data:image/png;base64,{}", general_purpose::STANDARD.encode(buf.get_ref())))
+}
+
+// Writes the seven frames the stitcher loads, before exposure matching.
+pub fn write_loaded_frames(src_dir: &str, out_dir: &str) -> Result<(), String> {
+    let settings: crate::app_settings::AppSettings = serde_json::from_str(
+        &fs::read_to_string("/home/dalibor/.local/share/io.github.CyberTimon.RapidRAW/settings.json").map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
+    for n in 8715..=8721 {
+        let path = format!("{src_dir}/DSCF{n}.RAF");
+        let (rgb, w, h, _) = load_linear(&path, &settings)?;
+        let mut file = fs::File::create(format!("{out_dir}/DSCF{n}.f32")).map_err(|e| e.to_string())?;
+        file.write_all(&w.to_le_bytes()).map_err(|e| e.to_string())?;
+        file.write_all(&h.to_le_bytes()).map_err(|e| e.to_string())?;
+        for chunk in rgb.chunks(1_048_576) {
+            let mut buf = Vec::with_capacity(chunk.len() * 4);
+            for v in chunk {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            file.write_all(&buf).map_err(|e| e.to_string())?;
+        }
+        let mean = rgb.iter().map(|v| *v as f64).sum::<f64>() / rgb.len() as f64;
+        println!("DSCF{n} {w}x{h} mean={mean:.4}");
+    }
+    Ok(())
+}
+
+fn file_name(path: &str) -> String {
+    Path::new(path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
+}
+
+fn first_number(s: &str) -> Option<f64> {
+    let mut num = String::new();
+    let mut seen = false;
+    for c in s.chars() {
+        if c.is_ascii_digit() || c == '.' {
+            num.push(c);
+            seen = true;
+        } else if seen {
+            break;
+        }
+    }
+    num.parse().ok()
+}
+
+fn parse_shutter(s: &str) -> Option<f64> {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix("1/") {
+        let denom = first_number(rest)?;
+        if denom > 0.0 { Some(1.0 / denom) } else { None }
+    } else {
+        first_number(t)
+    }
 }

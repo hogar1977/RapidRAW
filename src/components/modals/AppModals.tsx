@@ -24,7 +24,10 @@ import { CopyPasteSettings } from '../../utils/adjustments';
 export interface AppModalsProps {
   handleImageSelect: (path: string) => void;
   handleSavePanorama: (crop?: { x: number; y: number; width: number; height: number } | null) => Promise<string>;
-  handleStartPanorama: (paths: string[]) => void;
+  handleStartPanorama: (
+    paths: string[],
+    options: { cropFactor: number; focal35: number; estimateIntrinsics: boolean; scale: 'full' | 'half' },
+  ) => void;
   handleReprojectPanorama: (projection: string) => void;
   handleCancelPanorama: () => void;
   handleSaveHdr: () => Promise<string>;
@@ -158,6 +161,7 @@ export default function AppModals(props: AppModalsProps) {
         filenames={panoramaModalState.filenames}
         finalImageBase64={panoramaModalState.finalImageBase64}
         imageCount={panoramaModalState.stitchingSourcePaths.length}
+        sourcePaths={panoramaModalState.stitchingSourcePaths}
         isOpen={panoramaModalState.isOpen}
         isProcessing={panoramaModalState.isProcessing}
         loadingImageUrl={
@@ -194,7 +198,7 @@ export default function AppModals(props: AppModalsProps) {
         onOpenFile={(path: string) => props.handleImageSelect(path)}
         onProjectionChange={(projection) => props.handleReprojectPanorama(projection)}
         onSave={(crop) => props.handleSavePanorama(crop)}
-        onStitch={() => props.handleStartPanorama(panoramaModalState.stitchingSourcePaths)}
+        onStitch={(options) => props.handleStartPanorama(panoramaModalState.stitchingSourcePaths, options)}
         overlayBase64={panoramaModalState.overlayBase64}
         previewHeight={panoramaModalState.previewHeight}
         previewWidth={panoramaModalState.previewWidth}

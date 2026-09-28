@@ -1399,7 +1399,7 @@
       "retry": "Retry",
       "save": "Save",
       "savedSuccess": "Panorama Saved Successfully!",
-      "speedNotice": "Alignment, exposure matching, and blending finish before the preview appears. Save only renders the same result at full resolution.",
+      "speedNotice": "Alignment, exposure matching, and blending finish before the preview appears. Save writes that same result.",
       "savingProgress": "Saving… {{percent}}%",
       "start": "Start",
       "stitchingProgress": "Stitching Panorama",
@@ -1411,7 +1411,19 @@
         "spherical": "Spherical",
         "cylindrical": "Cylindrical",
         "perspective": "Perspective"
-      }
+      },
+      "continue": "Continue",
+      "lens": "Lens",
+      "noLensMatch": "No lens match",
+      "cropFactor": "Crop factor",
+      "focal35": "35mm equivalent focal length",
+      "unknown": "I don't know",
+      "nativeMm": "Lens focal length {{mm}} mm",
+      "checking": "Checking the photos...",
+      "memoryFull": "Full size uses about {{need}} GB. {{free}} GB is available.",
+      "memoryHalf": "Full size needs about {{full}} GB, and {{free}} GB is available, so the stitch will use half size (about {{half}} GB).",
+      "memoryBlocked": "Even half size needs about {{half}} GB, and only {{free}} GB is available.",
+      "sizeUnknown": "The image size could not be read, so stitching cannot start."
     },
     "renameAlbum": {
       "placeholder": "Enter new album name..."

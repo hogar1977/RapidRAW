@@ -1,14 +1,38 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle, XCircle, Loader2, Save, RefreshCw, Layers } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { CheckCircle, XCircle, Loader2, Save, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ReactCrop, { type PercentCrop, type Crop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import Button from '../ui/Button';
+import Input from '../ui/Input';
 import Text from '../ui/Text';
+import { Invokes } from '../ui/AppProperties';
 import { TextColors, TextVariants } from '../../types/typography';
 
 export type PanoramaProjection = 'spherical' | 'cylindrical' | 'perspective';
+
+export interface PanoramaStitchOptions {
+  cropFactor: number;
+  focal35: number;
+  estimateIntrinsics: boolean;
+  scale: 'full' | 'half';
+}
+
+interface LensProbe {
+  fullBytes: number;
+  halfBytes: number;
+  limitBytes: number;
+  scale: 'full' | 'half' | 'blocked';
+  sizeKnown: boolean;
+  lensMaker: string;
+  lensModel: string;
+  cropFactor: number;
+  focal35: number;
+  nativeMm: number;
+  disagreements: string[];
+}
 
 export interface PanoramaCropRect {
   x: number;
@@ -29,6 +53,7 @@ interface PanoramaModalProps {
   filenames: Array<string>;
   finalImageBase64: string | null;
   imageCount?: number;
+  sourcePaths: string[];
   isOpen: boolean;
   isProcessing: boolean;
   loadingImageUrl?: string | null;
@@ -36,7 +61,7 @@ interface PanoramaModalProps {
   onOpenFile(path: string): void;
   onProjectionChange(projection: PanoramaProjection): void;
   onSave(crop: PanoramaCropRect | null): Promise<string>;
-  onStitch(): void;
+  onStitch(options: PanoramaStitchOptions): void;
   overlayBase64: string | null;
   previewHeight: number;
   previewWidth: number;
@@ -83,6 +108,7 @@ export default function PanoramaModal({
   filenames,
   finalImageBase64,
   imageCount,
+  sourcePaths,
   isOpen,
   isProcessing,
   loadingImageUrl,
@@ -109,8 +135,13 @@ export default function PanoramaModal({
   const [localCrop, setLocalCrop] = useState<PercentCrop>(cropToPercent(crop));
   const [hoveredFile, setHoveredFile] = useState<string | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
-  const autoStartedRef = useRef(false);
+  const startedRef = useRef(false);
   const mouseDownTarget = useRef<EventTarget | null>(null);
+  const [probe, setProbe] = useState<LensProbe | null>(null);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [cropFactor, setCropFactor] = useState('1');
+  const [focal35, setFocal35] = useState('50');
+  const [unknown, setUnknown] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const winnerImgRef = useRef<HTMLImageElement | null>(null);
 
@@ -125,7 +156,10 @@ export default function PanoramaModal({
       setIsMounted(false);
       setSavedPath(null);
       setIsSaving(false);
-      autoStartedRef.current = false;
+      startedRef.current = false;
+      setProbe(null);
+      setProbeError(null);
+      setUnknown(false);
       setHoveredFile(null);
     }, 300);
     return () => clearTimeout(timer);
@@ -136,19 +170,46 @@ export default function PanoramaModal({
   }, [crop]);
 
   useEffect(() => {
-    if (
-      isOpen &&
-      !isProcessing &&
-      !finalImageBase64 &&
-      !error &&
-      !savedPath &&
-      (imageCount ?? 0) >= 2 &&
-      !autoStartedRef.current
-    ) {
-      autoStartedRef.current = true;
-      onStitch();
+    if (!isOpen || sourcePaths.length < 2 || startedRef.current) {
+      return;
     }
-  }, [isOpen, isProcessing, finalImageBase64, error, savedPath, imageCount, onStitch]);
+    let cancelled = false;
+    setProbe(null);
+    setProbeError(null);
+    invoke<LensProbe>(Invokes.ProbePanoramaLenses, { paths: sourcePaths })
+      .then((result) => {
+        if (cancelled) return;
+        setProbe(result);
+        setCropFactor(String(Math.round(result.cropFactor * 1000) / 1000));
+        setFocal35(String(Math.round(result.focal35 * 10) / 10));
+      })
+      .catch((err) => {
+        if (!cancelled) setProbeError(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, sourcePaths.join('\n')]);
+
+  const stitchOptions = (): PanoramaStitchOptions | null => {
+    if (!probe || probe.scale === 'blocked' || !probe.sizeKnown) return null;
+    const crop = Number(cropFactor);
+    const focal = Number(focal35);
+    if (!unknown && (!Number.isFinite(crop) || !Number.isFinite(focal) || crop <= 0 || focal <= 0)) return null;
+    return {
+      cropFactor: unknown ? probe.cropFactor : crop,
+      focal35: unknown ? probe.focal35 : focal,
+      estimateIntrinsics: unknown,
+      scale: probe.scale,
+    };
+  };
+
+  const startStitch = () => {
+    const options = stitchOptions();
+    if (!options) return;
+    startedRef.current = true;
+    onStitch(options);
+  };
 
   useEffect(() => {
     if (!winnerMapBase64) {
@@ -393,17 +454,97 @@ export default function PanoramaModal({
       );
     }
 
+    const gb = (bytes: number) => (bytes / (1024 * 1024 * 1024)).toFixed(1);
+    const native = probe && Number(cropFactor) > 0 ? Number(focal35) / Number(cropFactor) : null;
+
     return (
-      <div className="flex flex-col items-center justify-center h-[460px]">
-        <div className="flex items-center justify-center mb-6">
-          <Layers className="w-12 h-12 text-accent" />
+      <div className="flex flex-col gap-4 min-h-[280px]">
+        <div>
+          <Text variant={TextVariants.title} className="mb-1">
+            {t('modals.panorama.title')}
+          </Text>
+          <Text className="text-text-secondary">
+            {imageCount ? t('modals.panorama.descCount', { count: imageCount }) : t('modals.panorama.descGeneric')}
+          </Text>
         </div>
-        <Text variant={TextVariants.title} className="mb-3 text-center">
-          {t('modals.panorama.title')}
-        </Text>
-        <Text className="text-center max-w-md leading-relaxed text-text-secondary">
-          {imageCount ? t('modals.panorama.descCount', { count: imageCount }) : t('modals.panorama.descGeneric')}
-        </Text>
+        {!probe && !probeError && (
+          <Text className="text-text-secondary">{t('modals.panorama.checking')}</Text>
+        )}
+        {probeError && <Text className="text-red-400">{probeError}</Text>}
+        {probe && (
+          <>
+            <div>
+              <Text variant={TextVariants.small} className="uppercase tracking-wide opacity-60 mb-1">
+                {t('modals.panorama.lens')}
+              </Text>
+              <Text>
+                {probe.lensModel
+                  ? `${probe.lensMaker} ${probe.lensModel}`.trim()
+                  : t('modals.panorama.noLensMatch')}
+              </Text>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="uppercase tracking-wide opacity-60 text-xs">{t('modals.panorama.cropFactor')}</span>
+                <Input
+                  type="number"
+                  value={cropFactor}
+                  disabled={unknown}
+                  onChange={(e) => setCropFactor(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="uppercase tracking-wide opacity-60 text-xs">{t('modals.panorama.focal35')}</span>
+                <Input
+                  type="number"
+                  value={focal35}
+                  disabled={unknown}
+                  onChange={(e) => setFocal35(e.target.value)}
+                />
+              </label>
+            </div>
+            {!unknown && native != null && Number.isFinite(native) && (
+              <Text variant={TextVariants.small} className="text-text-secondary">
+                {t('modals.panorama.nativeMm', { mm: native.toFixed(1) })}
+              </Text>
+            )}
+            <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+              <input type="checkbox" checked={unknown} onChange={(e) => setUnknown(e.target.checked)} />
+              <span>{t('modals.panorama.unknown')}</span>
+            </label>
+            {probe.disagreements.length > 0 && (
+              <ul className="text-xs font-mono text-text-secondary space-y-1">
+                {probe.disagreements.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+            {!probe.sizeKnown && (
+              <div className="rounded-md border border-red-700/50 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+                {t('modals.panorama.sizeUnknown')}
+              </div>
+            )}
+            {probe.sizeKnown && probe.scale === 'blocked' && (
+              <div className="rounded-md border border-red-700/50 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+                {t('modals.panorama.memoryBlocked', { half: gb(probe.halfBytes), free: gb(probe.limitBytes) })}
+              </div>
+            )}
+            {probe.sizeKnown && probe.scale === 'half' && (
+              <div className="rounded-md border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+                {t('modals.panorama.memoryHalf', {
+                  full: gb(probe.fullBytes),
+                  half: gb(probe.halfBytes),
+                  free: gb(probe.limitBytes),
+                })}
+              </div>
+            )}
+            {probe.sizeKnown && probe.scale === 'full' && (
+              <Text variant={TextVariants.small} className="text-text-secondary">
+                {t('modals.panorama.memoryFull', { need: gb(probe.fullBytes), free: gb(probe.limitBytes) })}
+              </Text>
+            )}
+          </>
+        )}
       </div>
     );
   };
@@ -411,9 +552,22 @@ export default function PanoramaModal({
   const renderButtons = () => {
     if (error) {
       return (
-        <Button onClick={handleClose} className="w-full">
-          {t('modals.panorama.close')}
-        </Button>
+        <div className="w-full flex items-center justify-end gap-2">
+          <button
+            onClick={handleClose}
+            className="px-4 py-2 rounded-md text-text-secondary hover:bg-card-active transition-colors text-sm"
+          >
+            {t('modals.panorama.close')}
+          </button>
+          <Button
+            onClick={startStitch}
+            disabled={!stitchOptions()}
+            variant="secondary"
+          >
+            <RefreshCw className="mr-2" size={16} />
+            {t('modals.panorama.retry')}
+          </Button>
+        </div>
       );
     }
 
@@ -455,7 +609,7 @@ export default function PanoramaModal({
 
         <div
           className={`flex items-center justify-end gap-2 shrink-0 ${
-            isProcessing || isSaving ? 'opacity-50 pointer-events-none' : ''
+            isSaving ? 'opacity-50 pointer-events-none' : ''
           }`}
         >
           <button
@@ -467,9 +621,15 @@ export default function PanoramaModal({
           </button>
 
           {finalImageBase64 && (
-            <Button onClick={onStitch} disabled={isProcessing || isSaving} variant="secondary">
+            <Button onClick={startStitch} disabled={isProcessing || isSaving || !stitchOptions()} variant="secondary">
               {isProcessing ? <Loader2 className="animate-spin mr-2" size={16} /> : <RefreshCw className="mr-2" size={16} />}
               {t('modals.panorama.retry')}
+            </Button>
+          )}
+
+          {!finalImageBase64 && !isProcessing && (
+            <Button onClick={startStitch} disabled={!stitchOptions()}>
+              {t('modals.panorama.continue')}
             </Button>
           )}
 

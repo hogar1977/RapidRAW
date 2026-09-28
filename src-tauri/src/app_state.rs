@@ -150,6 +150,7 @@ pub struct AppState {
     pub export_task_token: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     pub hdr_result: Arc<Mutex<Option<DynamicImage>>>,
     pub panorama_session: Arc<Mutex<Option<crate::panorama_utils::session::PanoramaSession>>>,
+    pub panorama_stop: Arc<Mutex<Arc<AtomicBool>>>,
     pub focus_stack_result: Arc<Mutex<Option<DynamicImage>>>,
     pub denoise_result: Arc<Mutex<Option<DynamicImage>>>,
     pub indexing_task_handle: Mutex<Option<JoinHandle<()>>>,

@@ -250,6 +250,7 @@ export function useTauriListeners({
       listen('panorama-progress', (event: any) => {
         if (isEffectActive) {
           useUIStore.getState().setUI((state) => {
+            if (!state.panoramaModalState.isOpen) return state;
             if (state.panoramaModalState.finalImageBase64 || state.panoramaModalState.error) return state;
             return { panoramaModalState: { ...state.panoramaModalState, progressMessage: event.payload } };
           });
@@ -270,7 +271,9 @@ export function useTauriListeners({
       }),
       listen('panorama-complete', (event: any) => {
         if (isEffectActive) {
-          useUIStore.getState().setUI((state) => ({
+          useUIStore.getState().setUI((state) => {
+            if (!state.panoramaModalState.isOpen) return state;
+            return {
             panoramaModalState: {
               ...state.panoramaModalState,
               error: null,
@@ -289,24 +292,28 @@ export function useTauriListeners({
               saveProgressPercent: null,
               saveProgressMessage: null,
             },
-          }));
+          };
+          });
         }
       }),
       listen('panorama-error', (event: any) => {
         if (isEffectActive) {
-          useUIStore.getState().setUI((state) => ({
-            panoramaModalState: {
-              ...state.panoramaModalState,
-              error: String(event.payload),
-              finalImageBase64: null,
-              overlayBase64: null,
-              winnerMapBase64: null,
-              isProcessing: false,
-              progressMessage: null,
-              saveProgressPercent: null,
-              saveProgressMessage: null,
-            },
-          }));
+          useUIStore.getState().setUI((state) => {
+            if (!state.panoramaModalState.isOpen) return state;
+            return {
+              panoramaModalState: {
+                ...state.panoramaModalState,
+                error: String(event.payload),
+                finalImageBase64: null,
+                overlayBase64: null,
+                winnerMapBase64: null,
+                isProcessing: false,
+                progressMessage: null,
+                saveProgressPercent: null,
+                saveProgressMessage: null,
+              },
+            };
+          });
         }
       }),
       listen('hdr-progress', (event: any) => {
