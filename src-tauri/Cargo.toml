@@ -14,7 +14,7 @@ default = []
 tethering = ["dep:gphoto2"]
 
 [dependencies]
-tauri = { version = "2.11", features = [ "macos-private-api", "rustls-tls", "protocol-asset" ] }
+tauri = { version = "2.12", features = [ "macos-private-api", "rustls-tls", "protocol-asset" ] }
 tauri-plugin-dialog = "2.7.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -68,17 +68,37 @@ libc = "0.2.189"
 rgb = "0.8.53"
 imgref = "1.12.2"
 sysinfo = "0.39.6"
+tauri-plugin-http = "2.8.0"
+tauri-plugin-store = "2.5.0"
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 trash = "5.2.6"
 tauri-plugin-single-instance = "2.4.3"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "rustls"] }
+tauri-plugin-clerk = "0.1.1"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 gphoto2 = { git = "https://github.com/CyberTimon/libgphoto2-rs", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3.2", features = [
+    "NSData",
+    "NSDictionary",
+    "NSString",
+    "NSURL",
+    "NSValue",
+    "NSArray",
+] }
+objc2-core-foundation = { version = "0.3.2", features = ["CFCGTypes"] }
+objc2-core-graphics = { version = "0.3.2", features = ["CGColorSpace"] }
+objc2-core-image = { version = "0.3.2", features = [
+    "CIContext",
+    "CIFilter",
+    "CIImage",
+    "CIRAWFilter",
+] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 ndk-context = "0.1"

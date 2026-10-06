@@ -5,93 +5,227 @@ LOCALES_DIR = Path("./locales")
 
 TRANSLATIONS = {
     "ca": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mosaic"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Connectant…",
+                            "retry": "Tornar a intentar la connexió",
+                            "unsupported": "L'inici de sessió al núvol actualment només està disponible a l'escriptori."
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "cs": {
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Připojování…",
+                            "retry": "Opakovat připojení",
+                            "unsupported": "Přihlášení do cloudu je momentálně k dispozici pouze na počítači."
+                        }
+                    }
+                }
             }
         }
     },
     "de": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mosaik"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Verbinden…",
+                            "retry": "Verbindung erneut versuchen",
+                            "unsupported": "Die Cloud-Anmeldung ist derzeit nur auf dem Desktop verfügbar."
+                        }
+                    }
+                }
             }
         }
     },
     "en": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Masonry"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Connecting…",
+                            "retry": "Retry connection",
+                            "unsupported": "Cloud sign-in is currently only available on desktop."
+                        }
+                    }
+                }
             }
         }
     },
     "es": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mosaico"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Conectando…",
+                            "retry": "Reintentar conexión",
+                            "unsupported": "El inicio de sesión en la nube actualmente solo está disponible en escritorio."
+                        }
+                    }
+                }
             }
         }
     },
     "fr": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mosaïque"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Connexion…",
+                            "retry": "Réessayer la connexion",
+                            "unsupported": "La connexion au cloud n'est actuellement disponible que sur ordinateur."
+                        }
+                    }
+                }
             }
         }
     },
     "it": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mosaico"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Connessione in corso…",
+                            "retry": "Riprova connessione",
+                            "unsupported": "L'accesso al cloud è attualmente disponibile solo su desktop."
+                        }
+                    }
+                }
             }
         }
     },
     "ja": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "メイソンリー"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "接続中…",
+                            "retry": "接続を再試行",
+                            "unsupported": "クラウドへのサインインは現在、デスクトップでのみ利用可能です。"
+                        }
+                    }
+                }
             }
         }
     },
     "ko": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "메이슨리"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "연결 중…",
+                            "retry": "연결 재시도",
+                            "unsupported": "클라우드 로그인은 현재 데스크톱에서만 사용할 수 있습니다."
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "nl": {
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Verbinden…",
+                            "retry": "Verbinding opnieuw proberen",
+                            "unsupported": "Aanmelden bij de cloud is momenteel alleen beschikbaar op desktop."
+                        }
+                    }
+                }
             }
         }
     },
     "pl": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mozaika"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Łączenie…",
+                            "retry": "Ponów próbę połączenia",
+                            "unsupported": "Logowanie w chmurze jest obecnie dostępne tylko na komputerach."
+                        }
+                    }
+                }
             }
         }
     },
     "pt": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Mosaico"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Conectando…",
+                            "retry": "Tentar conexão novamente",
+                            "unsupported": "O login na nuvem está atualmente disponível apenas no desktop."
+                        }
+                    }
+                }
             }
         }
     },
     "ru": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "Мозаика"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "Подключение…",
+                            "retry": "Повторить попытку подключения",
+                            "unsupported": "Вход в облако в настоящее время доступен только на ПК."
+                        }
+                    }
+                }
             }
         }
     },
     "zh-CN": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "瀑布流"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "正在连接…",
+                            "retry": "重试连接",
+                            "unsupported": "云端登录目前仅在桌面设备上可用。"
+                        }
+                    }
+                }
             }
         }
     },
     "zh-TW": {
-        "library": {
-            "thumbnailFit": {
-                "justified": "瀑布流"
+        "settings": {
+            "processing": {
+                "ai": {
+                    "cloud": {
+                        "statuses": {
+                            "connecting": "連線中…",
+                            "retry": "重試連線",
+                            "unsupported": "雲端登入目前僅在桌面裝置上可用。"
+                        }
+                    }
+                }
             }
         }
     }
@@ -126,10 +260,8 @@ def update_json_file(file_path: Path, trans: dict):
         print(f"Error parsing JSON in {file_path.name}. Skipping.")
         return
 
-    # 1. Merge new translations
     deep_merge(data, trans)
 
-    # 2. Sort alphabetically to maintain formatting consistency
     sorted_data = sort_dict_recursively(data)
 
     with open(file_path, "w", encoding="utf-8") as f:
@@ -143,7 +275,7 @@ def main():
         print(f"Error: Locales directory '{LOCALES_DIR}' does not exist.")
         return
 
-    print("Starting translation updates for Masonry/Justified thumbnail fit...")
+    print("Starting translation updates for Cloud Statuses...")
     for lang, trans in TRANSLATIONS.items():
         file_path = LOCALES_DIR / f"{lang}.json"
         update_json_file(file_path, trans)

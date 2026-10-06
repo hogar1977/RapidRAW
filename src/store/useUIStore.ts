@@ -6,18 +6,11 @@ import {
   CullingSuggestions,
   PanelRegion,
   WorkspaceState,
+  CollapsibleSectionsState,
 } from '../components/ui/AppProperties';
 import { useEditorStore } from './useEditorStore';
 
 export type SwitcherPlacement = 'bottom' | 'right' | 'left' | 'top';
-
-interface CollapsibleSectionsState {
-  basic: boolean;
-  color: boolean;
-  curves: boolean;
-  details: boolean;
-  effects: boolean;
-}
 
 export interface CropSectionsState {
   transform: boolean;
@@ -294,6 +287,8 @@ export interface UIState {
   setPanel: (panel: Panel | null) => void;
   customEscapeHandler: (() => void) | null;
   setCustomEscapeHandler: (handler: (() => void) | null) => void;
+  imageSelectHandler: ((path: string, openInEditor?: boolean) => void) | null;
+  setImageSelectHandler: (handler: ((path: string, openInEditor?: boolean) => void) | null) => void;
   searchFocusRequest: number;
   requestSearchFocus: () => void;
   toggleFullScreen: () => void;
@@ -306,7 +301,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   isWindowFullScreen: false,
   isInstantTransition: false,
   isLayoutReady: false,
-  uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true },
+  uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true, quickFilter: false },
   isLibraryExportPanelVisible: false,
   isSettingsOpen: false,
 
@@ -558,7 +553,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       panelLayout: defaultWorkspace.panelLayout,
       activePanels: defaultWorkspace.activePanels,
       panelSwitcherPlacement: defaultWorkspace.panelSwitcherPlacement,
-      uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true },
+      uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true, quickFilter: false },
       activePanel: defaultWorkspace.activePanels.rightTop || null,
       renderedPanel: defaultWorkspace.activePanels.rightTop || null,
     });
@@ -567,6 +562,8 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   customEscapeHandler: null,
   setCustomEscapeHandler: (handler) => set({ customEscapeHandler: handler }),
+  imageSelectHandler: null,
+  setImageSelectHandler: (handler) => set({ imageSelectHandler: handler }),
   searchFocusRequest: 0,
   requestSearchFocus: () => set((state) => ({ searchFocusRequest: state.searchFocusRequest + 1 })),
 }));
