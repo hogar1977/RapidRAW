@@ -1,0 +1,201 @@
+[14:49:56] +0.0s log /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v52/DSCF0140/DSCF0140_Pano.pano.log
+[14:49:56] +0.0s merge started files=4
+[14:49:56] +0.1s focal native unavailable or disabled, using exif 35eq=27.0mm (crop=1.534)
+[14:49:56] +0.2s jpeg DSCF0140.RAF native 4416x2944 declared 4416x2944
+[14:49:56] +0.4s jpeg DSCF0141.RAF native 4416x2944 declared 4416x2944
+[14:49:56] +0.6s jpeg DSCF0142.RAF native 4416x2944 declared 4416x2944
+[14:49:57] +0.8s jpeg DSCF0143.RAF native 4416x2944 declared 4416x2944
+[14:49:58] +2.2s points DSCF0140.RAF 11408
+[14:49:58] +2.2s points DSCF0141.RAF 11474
+[14:49:58] +2.2s points DSCF0142.RAF 11423
+[14:49:58] +2.2s points DSCF0143.RAF 11376
+[14:50:00] +4.4s match DSCF0140.RAF<->DSCF0141.RAF: 2777 good
+[14:50:00] +4.4s match DSCF0140.RAF<->DSCF0142.RAF: 1895 good
+[14:50:00] +4.4s match DSCF0140.RAF<->DSCF0143.RAF: 1053 good
+[14:50:00] +4.4s match DSCF0141.RAF<->DSCF0142.RAF: 3813 good
+[14:50:00] +4.4s match DSCF0141.RAF<->DSCF0143.RAF: 2320 good
+[14:50:00] +4.4s match DSCF0142.RAF<->DSCF0143.RAF: 4231 good
+[14:50:00] +4.5s aligned kept=4 focal35=27.0 jpeg=4416x2944 points=4416x2944
+[14:50:00] +4.5s lens crop=1.534 focal35=27.0 calib=1.529
+[14:50:01] +5.0s sky target 0.8816
+[14:50:01] +5.0s sky scale DSCF0140.RAF 0.984 median 0.8962
+[14:50:01] +5.0s sky scale DSCF0141.RAF 1.000 median 0.8816
+[14:50:01] +5.0s sky scale DSCF0142.RAF 1.004 median 0.8784
+[14:50:01] +5.0s sky scale DSCF0143.RAF 1.015 median 0.8686
+[14:50:01] +5.0s Matching brightness...
+[14:50:01] +5.0s canvas cylindrical 2790x1260
+[14:50:01] +5.1s warp DSCF0142.RAF: bbox=(749,0,2465,1260) 1716x1260
+[14:50:01] +5.1s warp DSCF0143.RAF: bbox=(1067,0,2790,1260) 1723x1260
+[14:50:01] +5.1s warp DSCF0141.RAF: bbox=(369,0,2088,1260) 1719x1260
+[14:50:01] +5.1s warp DSCF0140.RAF: bbox=(0,0,1724,1260) 1724x1260
+[14:50:01] +5.2s brightness gains=4 corner=1.096
+[14:50:01] +5.2s Blending photos...
+[14:50:01] +5.3s blend 1: window=2235x1260 tiles=594
+[14:50:01] +5.5s local moved kept=242 field=10.72 disagree 0.2970 -> 0.1947
+[14:50:01] +5.5s seam grid 43x48 nodes=1942
+[14:50:01] +5.5s cut_energy opt=112654 shipped=112654 excess=+0.000%
+[14:50:01] +5.5s seam grid 316x360 nodes=26082
+[14:50:02] +5.6s cut_energy opt=1445145 shipped=1445145 excess=+0.000%
+[14:50:02] +5.6s seam refine nodes=26082
+[14:50:02] +5.6s painted
+[14:50:02] +5.6s mask blurred
+[14:50:02] +5.7s pyramid gauss
+[14:50:02] +5.8s pyramid expand
+[14:50:02] +5.8s pasted
+[14:50:02] +5.8s blended 1 keepA=0.19
+[14:50:02] +5.8s blend 2: window=2600x1260 tiles=702
+[14:50:02] +6.0s local moved kept=210 field=10.24 disagree 0.3535 -> 0.2524
+[14:50:02] +6.0s seam grid 43x47 nodes=1919
+[14:50:02] +6.0s cut_energy opt=140766 shipped=140766 excess=+0.000%
+[14:50:02] +6.0s seam grid 316x346 nodes=27844
+[14:50:02] +6.1s cut_energy opt=2678694 shipped=2678694 excess=+0.000%
+[14:50:02] +6.1s seam refine nodes=27844
+[14:50:02] +6.1s painted
+[14:50:02] +6.1s mask blurred
+[14:50:02] +6.2s pyramid gauss
+[14:50:02] +6.3s pyramid expand
+[14:50:02] +6.3s pasted
+[14:50:02] +6.3s blended 2 keepA=0.71
+[14:50:02] +6.3s blend 3: window=2236x1260 tiles=594
+[14:50:02] +6.5s local moved kept=234 field=20.58 disagree 0.3663 -> 0.2630
+[14:50:02] +6.5s seam grid 43x47 nodes=1917
+[14:50:02] +6.5s cut_energy opt=141666 shipped=141666 excess=+0.000%
+[14:50:02] +6.5s seam grid 316x349 nodes=28618
+[14:50:03] +6.6s cut_energy opt=2678813 shipped=2678813 excess=+0.000%
+[14:50:03] +6.6s seam refine nodes=28618
+[14:50:03] +6.6s painted
+[14:50:03] +6.6s mask blurred
+[14:50:03] +6.7s pyramid gauss
+[14:50:03] +6.7s pyramid expand
+[14:50:03] +6.8s pasted
+[14:50:03] +6.8s blended 3 keepA=0.76
+[14:50:03] +6.8s preview canvas cylindrical 2790x1260 shifts=3
+[14:50:03] +6.8s time  preview=2.27s (solve+match 4.48s)
+[14:50:03] +6.8s preview ready /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v52/DSCF0140/DSCF0140_preview.jpg
+[14:50:03] +6.8s save started
+[14:50:03] +6.8s develop jobs=4
+[14:50:06] +9.9s developed DSCF0140.RAF 7728x5152 -> 1920x1280
+[14:50:06] +9.9s developed DSCF0141.RAF 7728x5152 -> 1920x1280
+[14:50:06] +9.9s developed DSCF0142.RAF 7728x5152 -> 1920x1280
+[14:50:06] +9.9s developed DSCF0143.RAF 7728x5152 -> 1920x1280
+[14:50:06] +9.9s time  develop=3.10s
+[14:50:06] +9.9s scale raw=7728x5152 jpeg=4416x2944 x=1.7500 y=1.7500
+[14:50:06] +9.9s Matching brightness...
+[14:50:06] +9.9s canvas cylindrical 2790x1260
+[14:50:06] +10.1s warp DSCF0140.RAF: bbox=(0,0,1724,1260) 1724x1260
+[14:50:06] +10.1s warp DSCF0143.RAF: bbox=(1067,0,2790,1260) 1723x1260
+[14:50:06] +10.1s warp DSCF0142.RAF: bbox=(749,0,2465,1260) 1716x1260
+[14:50:06] +10.1s warp DSCF0141.RAF: bbox=(369,0,2088,1260) 1719x1260
+[14:50:06] +10.1s brightness gains=4 corner=0.990
+[14:50:06] +10.1s Blending photos...
+[14:50:06] +10.2s blend 1: window=2235x1260 tiles=594
+[14:50:06] +10.5s local moved kept=287 field=10.82 disagree 0.3253 -> 0.2048
+[14:50:06] +10.6s seam grid 43x49 nodes=1977
+[14:50:06] +10.6s cut_energy opt=140268 shipped=140268 excess=+0.000%
+[14:50:06] +10.6s seam grid 316x362 nodes=24849
+[14:50:07] +10.6s cut_energy opt=1889634 shipped=1889634 excess=+0.000%
+[14:50:07] +10.6s seam refine nodes=24849
+[14:50:07] +10.6s painted
+[14:50:07] +10.6s mask blurred
+[14:50:07] +10.7s pyramid gauss
+[14:50:07] +10.8s pyramid expand
+[14:50:07] +10.8s pasted
+[14:50:07] +10.8s blended 1 keepA=0.17
+[14:50:07] +10.8s blend 2: window=2600x1260 tiles=702
+[14:50:07] +11.1s local moved kept=268 field=11.67 disagree 0.3565 -> 0.2549
+[14:50:07] +11.1s seam grid 43x47 nodes=1914
+[14:50:07] +11.1s cut_energy opt=132240 shipped=132240 excess=+0.000%
+[14:50:07] +11.1s seam grid 316x348 nodes=28309
+[14:50:07] +11.2s cut_energy opt=2191875 shipped=2191875 excess=+0.000%
+[14:50:07] +11.2s seam refine nodes=28309
+[14:50:07] +11.2s painted
+[14:50:07] +11.2s mask blurred
+[14:50:07] +11.2s pyramid gauss
+[14:50:07] +11.3s pyramid expand
+[14:50:07] +11.3s pasted
+[14:50:07] +11.3s blended 2 keepA=0.77
+[14:50:07] +11.3s blend 3: window=2236x1260 tiles=594
+[14:50:07] +11.5s local moved kept=282 field=17.65 disagree 0.3319 -> 0.2293
+[14:50:07] +11.6s seam grid 43x47 nodes=1902
+[14:50:07] +11.6s cut_energy opt=106083 shipped=106083 excess=+0.000%
+[14:50:07] +11.6s seam grid 316x351 nodes=25393
+[14:50:08] +11.7s cut_energy opt=3754776 shipped=3754776 excess=+0.000%
+[14:50:08] +11.7s seam refine nodes=25393
+[14:50:08] +11.7s painted
+[14:50:08] +11.7s mask blurred
+[14:50:08] +11.8s pyramid gauss
+[14:50:08] +11.9s pyramid expand
+[14:50:08] +11.9s pasted
+[14:50:08] +11.9s blended 3 keepA=0.56
+[14:50:08] +11.9s time  linear_photometry=1.93s
+[14:50:08] +11.9s photometry source=second compose
+[14:50:08] +11.9s save seam preview
+[14:50:08] +11.9s save cut fullres
+[14:50:08] +11.9s photometry gains=4
+[14:50:08] +11.9s photo pedestal=0.006100 field_norm=0.534969 gains=[1.0804 1.0306 0.8797 1.0210]
+[14:50:08] +11.9s save seam developed
+[14:50:08] +11.9s canvas cylindrical 11230x5069
+[14:50:08] +12.1s local align resolution 1/1
+[14:50:08] +12.1s composite levels=6 pad=512
+[14:50:08] +12.1s local alignment refine=false
+[14:50:09] +13.1s warped DSCF0142.RAF straight
+[14:50:10] +14.5s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0048 (rejected)
+[14:50:11] +14.7s seam grid 162x179 nodes=28091
+[14:50:11] +14.8s cut_energy opt=194423 shipped=194423 excess=+0.000%
+[14:50:11] +14.9s seam grid 1268x1407 nodes=100382
+[14:50:12] +16.5s cut_energy opt=1660888 shipped=1660888 excess=+0.000%
+[14:50:12] +16.5s seam refine nodes=100382
+[14:50:12] +16.5s painted
+[14:50:13] +16.6s mask blurred
+[14:50:13] +16.8s flat-average thr=0.0060 pull=0.400 pixels=13446359
+[14:50:14] +18.0s pyramid gauss
+[14:50:15] +18.9s pyramid expand
+[14:50:15] +19.0s blended
+[14:50:15] +19.0s seam 1 window=7422x5069 keepA=0.48
+[14:50:15] +19.0s warped DSCF0143.RAF nudged
+[14:50:16] +20.4s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0177 (rejected)
+[14:50:17] +20.7s seam grid 162x172 nodes=27250
+[14:50:17] +20.8s cut_energy opt=232396 shipped=232396 excess=+0.000%
+[14:50:17] +20.9s seam grid 1267x1348 nodes=119337
+[14:50:18] +22.4s cut_energy opt=2023297 shipped=2023297 excess=+0.000%
+[14:50:18] +22.4s seam refine nodes=119337
+[14:50:18] +22.4s painted
+[14:50:18] +22.5s mask blurred
+[14:50:19] +22.6s flat-average thr=0.0060 pull=0.400 pixels=13575770
+[14:50:20] +23.9s pyramid gauss
+[14:50:21] +24.6s pyramid expand
+[14:50:21] +24.7s blended
+[14:50:21] +24.7s seam 2 window=7893x5069 keepA=0.45
+[14:50:21] +24.7s warped DSCF0141.RAF nudged
+[14:50:22] +26.3s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0296 (rejected)
+[14:50:22] +26.5s seam grid 162x174 nodes=27537
+[14:50:23] +26.6s cut_energy opt=298906 shipped=298906 excess=+0.000%
+[14:50:23] +26.7s seam grid 1267x1363 nodes=115753
+[14:50:24] +27.9s cut_energy opt=2791820 shipped=2791820 excess=+0.000%
+[14:50:24] +27.9s seam refine nodes=115753
+[14:50:24] +27.9s painted
+[14:50:24] +28.0s mask blurred
+[14:50:24] +28.2s flat-average thr=0.0060 pull=0.400 pixels=14630004
+[14:50:25] +29.5s pyramid gauss
+[14:50:26] +30.2s pyramid expand
+[14:50:26] +30.3s blended
+[14:50:26] +30.3s seam 3 window=7424x5069 keepA=0.37
+[14:50:26] +30.3s warped DSCF0140.RAF nudged
+[14:50:26] +30.3s refined shifts seams=0 mean_abs_shift=0.000px max_abs_shift=0.000px
+[14:50:26] +30.3s exposure gains applied 1
+[14:50:26] +30.4s SAVECROP canvas=11230x5069 crop=(0.01649,0.09841) size=0.97204x0.83810 -> tiff 10916x4248
+[14:50:26] +30.4s save encode 10916x4248
+[14:50:30] +34.0s seam dump /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v52/DSCF0140/seams.txt
+[14:50:30] +34.0s blend_stage extract=0.00s
+[14:50:30] +34.0s blend_stage graphcut=5.51s
+[14:50:30] +34.0s blend_stage mask_blur=0.27s
+[14:50:30] +34.0s blend_stage pyr_blend=4.37s
+[14:50:30] +34.0s boundary_step final: n=2499 median_step=4.03% p90=35.35%
+[14:50:30] +34.0s blinds_flat  final: n=0 median_step=0.00% p90=0.00%
+[14:50:30] +34.0s woodline    final: n=1680 median_step=2.55% p90=28.95%
+[14:50:30] +34.0s ghost_band   final: mean=0.723 keepA=0.43 cut_px=21194 swallowed=0
+[14:50:30] +34.0s sharpness_lapvar final: 43.96670011852724
+[14:50:30] +34.0s pano_mean_lum 0.1383232977254682 shadow_median 0.046406060457229614 canvas 10916x4248 levels=6 window_px=512
+[14:50:30] +34.0s time  final blend=14.76s encode_tiff=0.46s metrics=2.59s photometry=1.15s step_metrics=0.14s warp=1.63s
+[14:50:30] +34.0s time  total=34.02s
+[14:50:30] +34.0s saved /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v52/DSCF0140/DSCF0140_Pano.tiff

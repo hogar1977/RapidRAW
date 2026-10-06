@@ -1,0 +1,24 @@
+[package]
+name = "lean_pano_proto"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[dependencies]
+rapidraw_lib = { package = "RapidRAW", path = "../src-tauri" }
+image = "0.25.10"
+jpeg-decoder = "0.3"
+rayon = "1.12"
+nalgebra = "0.35.0"
+
+[profile.dev]
+opt-level = 2
+debug = 1
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.RapidRAW]
+opt-level = 2

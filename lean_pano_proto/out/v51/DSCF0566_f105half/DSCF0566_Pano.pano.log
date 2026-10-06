@@ -1,0 +1,479 @@
+[07:10:11] +0.0s log /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v51/DSCF0566/DSCF0566_Pano.pano.log
+[07:10:11] +0.0s merge started files=10
+[07:10:11] +0.1s focal native unavailable or disabled, using exif 35eq=105.0mm (crop=1.534)
+[07:10:11] +0.2s jpeg DSCF0566.RAF native 4416x2944 declared 4416x2944
+[07:10:11] +0.4s jpeg DSCF0567.RAF native 4416x2944 declared 4416x2944
+[07:10:11] +0.6s jpeg DSCF0568.RAF native 4416x2944 declared 4416x2944
+[07:10:12] +0.8s jpeg DSCF0569.RAF native 4416x2944 declared 4416x2944
+[07:10:12] +1.0s jpeg DSCF0570.RAF native 4416x2944 declared 4416x2944
+[07:10:12] +1.2s jpeg DSCF0571.RAF native 4416x2944 declared 4416x2944
+[07:10:12] +1.4s jpeg DSCF0572.RAF native 4416x2944 declared 4416x2944
+[07:10:13] +1.6s jpeg DSCF0573.RAF native 4416x2944 declared 4416x2944
+[07:10:13] +1.8s jpeg DSCF0574.RAF native 4416x2944 declared 4416x2944
+[07:10:13] +2.1s jpeg DSCF0575.RAF native 4416x2944 declared 4416x2944
+[07:10:15] +4.2s points DSCF0566.RAF 11766
+[07:10:15] +4.2s points DSCF0567.RAF 11738
+[07:10:15] +4.2s points DSCF0568.RAF 11678
+[07:10:15] +4.2s points DSCF0569.RAF 11728
+[07:10:15] +4.2s points DSCF0570.RAF 11771
+[07:10:15] +4.2s points DSCF0571.RAF 11772
+[07:10:15] +4.2s points DSCF0572.RAF 11762
+[07:10:15] +4.2s points DSCF0573.RAF 11774
+[07:10:15] +4.2s points DSCF0574.RAF 11740
+[07:10:15] +4.2s points DSCF0575.RAF 11787
+[07:10:15] +4.2s matching 17 neighbor pairs
+[07:10:19] +8.6s match DSCF0566.RAF<->DSCF0567.RAF: 4866 good
+[07:10:19] +8.6s match DSCF0566.RAF<->DSCF0568.RAF: 3120 good
+[07:10:19] +8.6s match DSCF0567.RAF<->DSCF0568.RAF: 5713 good
+[07:10:19] +8.6s match DSCF0567.RAF<->DSCF0569.RAF: 4446 good
+[07:10:19] +8.6s match DSCF0568.RAF<->DSCF0569.RAF: 6127 good
+[07:10:19] +8.6s match DSCF0568.RAF<->DSCF0570.RAF: 4395 good
+[07:10:19] +8.6s match DSCF0569.RAF<->DSCF0570.RAF: 5959 good
+[07:10:19] +8.6s match DSCF0569.RAF<->DSCF0571.RAF: 4273 good
+[07:10:19] +8.6s match DSCF0570.RAF<->DSCF0571.RAF: 6233 good
+[07:10:19] +8.6s match DSCF0570.RAF<->DSCF0572.RAF: 4408 good
+[07:10:19] +8.6s match DSCF0571.RAF<->DSCF0572.RAF: 6161 good
+[07:10:19] +8.6s match DSCF0571.RAF<->DSCF0573.RAF: 4555 good
+[07:10:19] +8.6s match DSCF0572.RAF<->DSCF0573.RAF: 6270 good
+[07:10:19] +8.6s match DSCF0572.RAF<->DSCF0574.RAF: 4378 good
+[07:10:19] +8.6s match DSCF0573.RAF<->DSCF0574.RAF: 6118 good
+[07:10:19] +8.6s match DSCF0573.RAF<->DSCF0575.RAF: 4483 good
+[07:10:19] +8.6s match DSCF0574.RAF<->DSCF0575.RAF: 6447 good
+[07:10:20] +9.2s aligned kept=10 focal35=105.0 jpeg=4416x2944 points=4416x2944
+[07:10:20] +9.2s lens crop=1.534 focal35=105.0 calib=1.529
+[07:10:21] +10.5s sky target 0.1864
+[07:10:21] +10.5s sky scale DSCF0566.RAF 1.598 median 0.1167
+[07:10:21] +10.5s sky scale DSCF0567.RAF 0.938 median 0.1987
+[07:10:21] +10.5s sky scale DSCF0568.RAF 1.000 median 0.1864
+[07:10:21] +10.5s sky scale DSCF0569.RAF 0.939 median 0.1985
+[07:10:21] +10.5s sky scale DSCF0570.RAF 1.008 median 0.1850
+[07:10:21] +10.5s sky scale DSCF0571.RAF 1.011 median 0.1844
+[07:10:21] +10.5s sky scale DSCF0572.RAF 1.021 median 0.1827
+[07:10:21] +10.5s sky scale DSCF0573.RAF 1.005 median 0.1855
+[07:10:21] +10.5s sky scale DSCF0574.RAF 0.853 median 0.2185
+[07:10:21] +10.5s sky scale DSCF0575.RAF 0.806 median 0.2312
+[07:10:21] +10.5s Matching brightness...
+[07:10:21] +10.5s canvas perspective 6415x1694
+[07:10:22] +10.7s warp DSCF0575.RAF: bbox=(4454,356,6415,1687) 1961x1331
+[07:10:22] +10.7s warp DSCF0573.RAF: bbox=(3651,324,5616,1652) 1965x1328
+[07:10:22] +10.7s warp DSCF0570.RAF: bbox=(2354,242,4455,1656) 2101x1414
+[07:10:22] +10.7s warp DSCF0567.RAF: bbox=(870,104,3323,1690) 2453x1586
+[07:10:22] +10.7s warp DSCF0572.RAF: bbox=(3233,310,5228,1654) 1995x1344
+[07:10:22] +10.7s warp DSCF0574.RAF: bbox=(4088,355,6042,1677) 1954x1322
+[07:10:22] +10.7s warp DSCF0569.RAF: bbox=(1869,203,4063,1667) 2194x1464
+[07:10:22] +10.7s warp DSCF0568.RAF: bbox=(1381,159,3691,1679) 2310x1520
+[07:10:22] +10.7s warp DSCF0571.RAF: bbox=(2808,281,4844,1654) 2036x1373
+[07:10:22] +10.8s warp DSCF0566.RAF: bbox=(0,0,2734,1694) 2734x1694
+[07:10:22] +11.0s brightness gains=10 corner=0.659
+[07:10:22] +11.0s Blending photos...
+[07:10:22] +11.3s blend 1: window=3019x1694 tiles=1150
+[07:10:23] +11.7s local moved kept=278 field=3.46 disagree 0.1927 -> 0.0823
+[07:10:23] +11.7s seam grid 47x55 nodes=2380
+[07:10:23] +11.7s cut_energy opt=174213 shipped=174213 excess=+0.000%
+[07:10:23] +11.7s seam grid 346x416 nodes=41646
+[07:10:23] +11.9s cut_energy opt=2053070 shipped=2053070 excess=+0.000%
+[07:10:23] +11.9s seam refine nodes=41646
+[07:10:23] +11.9s painted
+[07:10:23] +11.9s mask blurred
+[07:10:23] +12.0s pyramid gauss
+[07:10:23] +12.1s pyramid expand
+[07:10:23] +12.2s pasted
+[07:10:23] +12.2s blended 1 keepA=0.61
+[07:10:23] +12.2s blend 2: window=3125x1694 tiles=1175
+[07:10:23] +12.5s local moved kept=286 field=4.25 disagree 0.2442 -> 0.1300
+[07:10:23] +12.5s seam grid 47x56 nodes=2478
+[07:10:23] +12.5s cut_energy opt=164803 shipped=164803 excess=+0.000%
+[07:10:23] +12.5s seam grid 353x425 nodes=43142
+[07:10:24] +12.8s cut_energy opt=2238879 shipped=2238879 excess=+0.000%
+[07:10:24] +12.8s seam refine nodes=43142
+[07:10:24] +12.8s painted
+[07:10:24] +12.8s mask blurred
+[07:10:24] +12.9s pyramid gauss
+[07:10:24] +13.0s pyramid expand
+[07:10:24] +13.0s pasted
+[07:10:24] +13.0s blended 2 keepA=0.88
+[07:10:24] +13.0s blend 3: window=2989x1694 tiles=1125
+[07:10:24] +13.3s local moved kept=281 field=3.97 disagree 0.2464 -> 0.1088
+[07:10:24] +13.3s seam grid 46x54 nodes=2339
+[07:10:24] +13.3s cut_energy opt=105245 shipped=105245 excess=+0.000%
+[07:10:24] +13.3s seam grid 343x407 nodes=31895
+[07:10:24] +13.5s cut_energy opt=2062883 shipped=2062883 excess=+0.000%
+[07:10:24] +13.5s seam refine nodes=31895
+[07:10:24] +13.5s painted
+[07:10:24] +13.5s mask blurred
+[07:10:25] +13.6s pyramid gauss
+[07:10:25] +13.8s pyramid expand
+[07:10:25] +13.8s pasted
+[07:10:25] +13.8s blended 3 keepA=0.68
+[07:10:25] +13.8s blend 4: window=3218x1694 tiles=1225
+[07:10:25] +14.1s local moved kept=315 field=5.15 disagree 0.2326 -> 0.1098
+[07:10:25] +14.1s seam grid 49x58 nodes=2624
+[07:10:25] +14.1s cut_energy opt=118080 shipped=118080 excess=+0.000%
+[07:10:25] +14.1s seam grid 365x440 nodes=41517
+[07:10:25] +14.4s cut_energy opt=1541806 shipped=1541806 excess=+0.000%
+[07:10:25] +14.4s seam refine nodes=41517
+[07:10:25] +14.4s painted
+[07:10:25] +14.4s mask blurred
+[07:10:25] +14.6s pyramid gauss
+[07:10:26] +14.7s pyramid expand
+[07:10:26] +14.7s pasted
+[07:10:26] +14.7s blended 4 keepA=0.74
+[07:10:26] +14.7s blend 5: window=3334x1694 tiles=1275
+[07:10:26] +15.1s local moved kept=395 field=6.18 disagree 0.2268 -> 0.0954
+[07:10:26] +15.1s seam grid 50x62 nodes=2850
+[07:10:26] +15.1s cut_energy opt=138612 shipped=138612 excess=+0.000%
+[07:10:26] +15.1s seam grid 377x468 nodes=42366
+[07:10:26] +15.3s cut_energy opt=1463354 shipped=1463354 excess=+0.000%
+[07:10:26] +15.3s seam refine nodes=42366
+[07:10:26] +15.3s painted
+[07:10:26] +15.3s mask blurred
+[07:10:26] +15.4s pyramid gauss
+[07:10:26] +15.4s pyramid expand
+[07:10:26] +15.4s pasted
+[07:10:26] +15.4s blended 5 keepA=0.74
+[07:10:26] +15.4s blend 6: window=2839x1694 tiles=1075
+[07:10:27] +15.8s local moved kept=267 field=4.63 disagree 0.3091 -> 0.1199
+[07:10:27] +15.8s seam grid 45x53 nodes=2328
+[07:10:27] +15.8s cut_energy opt=208440 shipped=208440 excess=+0.000%
+[07:10:27] +15.8s seam grid 334x395 nodes=30699
+[07:10:27] +16.0s cut_energy opt=2352006 shipped=2352006 excess=+0.000%
+[07:10:27] +16.0s seam refine nodes=30699
+[07:10:27] +16.0s painted
+[07:10:27] +16.0s mask blurred
+[07:10:27] +16.2s pyramid gauss
+[07:10:27] +16.3s pyramid expand
+[07:10:27] +16.3s pasted
+[07:10:27] +16.3s blended 6 keepA=0.40
+[07:10:27] +16.3s blend 7: window=3477x1694 tiles=1325
+[07:10:28] +16.7s local moved kept=443 field=6.77 disagree 0.2317 -> 0.1004
+[07:10:28] +16.7s seam grid 52x66 nodes=3124
+[07:10:28] +16.7s cut_energy opt=102998 shipped=102998 excess=+0.000%
+[07:10:28] +16.8s seam grid 391x498 nodes=36509
+[07:10:28] +16.9s cut_energy opt=1428543 shipped=1428543 excess=+0.000%
+[07:10:28] +16.9s seam refine nodes=36509
+[07:10:28] +16.9s painted
+[07:10:28] +16.9s mask blurred
+[07:10:28] +17.1s pyramid gauss
+[07:10:28] +17.2s pyramid expand
+[07:10:28] +17.2s pasted
+[07:10:28] +17.2s blended 7 keepA=0.36
+[07:10:28] +17.2s blend 8: window=2473x1694 tiles=925
+[07:10:28] +17.5s local moved kept=318 field=5.05 disagree 0.3362 -> 0.1237
+[07:10:28] +17.6s seam grid 46x55 nodes=2404
+[07:10:28] +17.6s cut_energy opt=145188 shipped=145188 excess=+0.000%
+[07:10:28] +17.6s seam grid 340x410 nodes=29306
+[07:10:29] +17.7s cut_energy opt=2352752 shipped=2352752 excess=+0.000%
+[07:10:29] +17.7s seam refine nodes=29306
+[07:10:29] +17.7s painted
+[07:10:29] +17.7s mask blurred
+[07:10:29] +17.8s pyramid gauss
+[07:10:29] +17.9s pyramid expand
+[07:10:29] +17.9s pasted
+[07:10:29] +17.9s blended 8 keepA=0.80
+[07:10:29] +17.9s blend 9: window=3246x1694 tiles=1225
+[07:10:29] +18.3s local moved kept=414 field=8.21 disagree 0.2050 -> 0.0813
+[07:10:29] +18.3s seam grid 54x63 nodes=3122
+[07:10:29] +18.3s cut_energy opt=173983 shipped=173983 excess=+0.000%
+[07:10:29] +18.3s seam grid 403x479 nodes=47974
+[07:10:29] +18.6s cut_energy opt=1973812 shipped=1973812 excess=+0.000%
+[07:10:29] +18.6s seam refine nodes=47974
+[07:10:29] +18.6s painted
+[07:10:29] +18.6s mask blurred
+[07:10:30] +18.7s pyramid gauss
+[07:10:30] +18.8s pyramid expand
+[07:10:30] +18.8s pasted
+[07:10:30] +18.8s blended 9 keepA=0.42
+[07:10:30] +18.8s preview canvas perspective 6415x1694 shifts=9
+[07:10:30] +18.8s time  preview=9.57s (solve+match 9.24s)
+[07:10:30] +18.9s preview ready /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v51/DSCF0566/DSCF0566_preview.jpg
+[07:10:30] +18.9s save started
+[07:10:30] +18.9s develop jobs=4
+[07:10:36] +25.1s developed DSCF0566.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0567.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0568.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0569.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0570.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0571.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0572.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0573.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0574.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s developed DSCF0575.RAF 7728x5152 -> 1920x1280
+[07:10:36] +25.1s time  develop=6.18s
+[07:10:36] +25.1s scale raw=7728x5152 jpeg=4416x2944 x=1.7500 y=1.7500
+[07:10:36] +25.1s Matching brightness...
+[07:10:36] +25.1s canvas perspective 6415x1694
+[07:10:36] +25.2s warp DSCF0573.RAF: bbox=(3651,324,5616,1652) 1965x1328
+[07:10:36] +25.2s warp DSCF0570.RAF: bbox=(2354,242,4455,1656) 2101x1414
+[07:10:36] +25.2s warp DSCF0575.RAF: bbox=(4454,356,6415,1687) 1961x1331
+[07:10:36] +25.2s warp DSCF0572.RAF: bbox=(3233,310,5228,1654) 1995x1344
+[07:10:36] +25.2s warp DSCF0569.RAF: bbox=(1869,203,4063,1667) 2194x1464
+[07:10:36] +25.3s warp DSCF0571.RAF: bbox=(2808,281,4844,1654) 2036x1373
+[07:10:36] +25.3s warp DSCF0567.RAF: bbox=(870,104,3323,1690) 2453x1586
+[07:10:36] +25.3s warp DSCF0574.RAF: bbox=(4088,355,6042,1677) 1954x1322
+[07:10:36] +25.3s warp DSCF0566.RAF: bbox=(0,0,2734,1694) 2734x1694
+[07:10:36] +25.3s warp DSCF0568.RAF: bbox=(1381,159,3691,1679) 2310x1520
+[07:10:36] +25.6s brightness gains=10 corner=0.636
+[07:10:36] +25.6s Blending photos...
+[07:10:37] +25.9s blend 1: window=3019x1694 tiles=1150
+[07:10:37] +26.4s local moved kept=256 field=4.18 disagree 0.2697 -> 0.0997
+[07:10:37] +26.4s seam grid 47x55 nodes=2381
+[07:10:37] +26.4s cut_energy opt=172402 shipped=172402 excess=+0.000%
+[07:10:37] +26.4s seam grid 346x416 nodes=37642
+[07:10:37] +26.6s cut_energy opt=1884045 shipped=1884045 excess=+0.000%
+[07:10:37] +26.6s seam refine nodes=37642
+[07:10:37] +26.6s painted
+[07:10:37] +26.6s mask blurred
+[07:10:38] +26.7s pyramid gauss
+[07:10:38] +26.8s pyramid expand
+[07:10:38] +26.9s pasted
+[07:10:38] +26.9s blended 1 keepA=0.69
+[07:10:38] +26.9s blend 2: window=3125x1694 tiles=1175
+[07:10:38] +27.2s local moved kept=273 field=4.74 disagree 0.2952 -> 0.1335
+[07:10:38] +27.2s seam grid 47x56 nodes=2477
+[07:10:38] +27.2s cut_energy opt=152393 shipped=152393 excess=+0.000%
+[07:10:38] +27.2s seam grid 353x425 nodes=36330
+[07:10:38] +27.4s cut_energy opt=1838750 shipped=1838750 excess=+0.000%
+[07:10:38] +27.4s seam refine nodes=36330
+[07:10:38] +27.4s painted
+[07:10:38] +27.4s mask blurred
+[07:10:38] +27.5s pyramid gauss
+[07:10:38] +27.6s pyramid expand
+[07:10:38] +27.6s pasted
+[07:10:38] +27.6s blended 2 keepA=0.41
+[07:10:38] +27.6s blend 3: window=2989x1694 tiles=1125
+[07:10:39] +27.9s local moved kept=269 field=7.24 disagree 0.3435 -> 0.1599
+[07:10:39] +27.9s seam grid 46x54 nodes=2341
+[07:10:39] +27.9s cut_energy opt=105876 shipped=105876 excess=+0.000%
+[07:10:39] +27.9s seam grid 342x407 nodes=32452
+[07:10:39] +28.1s cut_energy opt=1746032 shipped=1746032 excess=+0.000%
+[07:10:39] +28.1s seam refine nodes=32452
+[07:10:39] +28.1s painted
+[07:10:39] +28.1s mask blurred
+[07:10:39] +28.2s pyramid gauss
+[07:10:39] +28.3s pyramid expand
+[07:10:39] +28.3s pasted
+[07:10:39] +28.3s blended 3 keepA=0.67
+[07:10:39] +28.3s blend 4: window=3218x1694 tiles=1225
+[07:10:40] +28.7s local moved kept=318 field=8.59 disagree 0.3057 -> 0.1418
+[07:10:40] +28.7s seam grid 49x58 nodes=2625
+[07:10:40] +28.7s cut_energy opt=116062 shipped=116062 excess=+0.000%
+[07:10:40] +28.8s seam grid 365x440 nodes=35469
+[07:10:40] +28.9s cut_energy opt=1400861 shipped=1400861 excess=+0.000%
+[07:10:40] +28.9s seam refine nodes=35469
+[07:10:40] +28.9s painted
+[07:10:40] +28.9s mask blurred
+[07:10:40] +29.0s pyramid gauss
+[07:10:40] +29.1s pyramid expand
+[07:10:40] +29.1s pasted
+[07:10:40] +29.1s blended 4 keepA=0.20
+[07:10:40] +29.1s blend 5: window=3334x1694 tiles=1275
+[07:10:40] +29.5s local moved kept=396 field=11.36 disagree 0.2898 -> 0.1471
+[07:10:40] +29.5s seam grid 51x62 nodes=2850
+[07:10:40] +29.5s cut_energy opt=139826 shipped=139826 excess=+0.000%
+[07:10:40] +29.6s seam grid 378x468 nodes=43326
+[07:10:41] +29.7s cut_energy opt=1397425 shipped=1397425 excess=+0.000%
+[07:10:41] +29.7s seam refine nodes=43326
+[07:10:41] +29.7s painted
+[07:10:41] +29.7s mask blurred
+[07:10:41] +29.9s pyramid gauss
+[07:10:41] +30.0s pyramid expand
+[07:10:41] +30.0s pasted
+[07:10:41] +30.0s blended 5 keepA=0.64
+[07:10:41] +30.0s blend 6: window=2839x1694 tiles=1075
+[07:10:41] +30.3s local moved kept=273 field=10.76 disagree 0.3758 -> 0.1900
+[07:10:41] +30.3s seam grid 45x53 nodes=2327
+[07:10:41] +30.3s cut_energy opt=193717 shipped=193717 excess=+0.000%
+[07:10:41] +30.3s seam grid 334x395 nodes=28840
+[07:10:41] +30.5s cut_energy opt=2091995 shipped=2091995 excess=+0.000%
+[07:10:41] +30.5s seam refine nodes=28840
+[07:10:41] +30.5s painted
+[07:10:41] +30.5s mask blurred
+[07:10:41] +30.6s pyramid gauss
+[07:10:42] +30.7s pyramid expand
+[07:10:42] +30.7s pasted
+[07:10:42] +30.7s blended 6 keepA=0.64
+[07:10:42] +30.7s blend 7: window=3477x1694 tiles=1325
+[07:10:42] +31.1s local moved kept=475 field=13.35 disagree 0.2889 -> 0.1461
+[07:10:42] +31.1s seam grid 52x66 nodes=3124
+[07:10:42] +31.1s cut_energy opt=102313 shipped=102313 excess=+0.000%
+[07:10:42] +31.1s seam grid 391x498 nodes=37192
+[07:10:42] +31.3s cut_energy opt=1389778 shipped=1389778 excess=+0.000%
+[07:10:42] +31.3s seam refine nodes=37192
+[07:10:42] +31.3s painted
+[07:10:42] +31.3s mask blurred
+[07:10:42] +31.4s pyramid gauss
+[07:10:42] +31.6s pyramid expand
+[07:10:42] +31.6s pasted
+[07:10:42] +31.6s blended 7 keepA=0.52
+[07:10:42] +31.6s blend 8: window=2473x1694 tiles=925
+[07:10:43] +31.9s local moved kept=304 field=11.24 disagree 0.3859 -> 0.1867
+[07:10:43] +31.9s seam grid 46x55 nodes=2404
+[07:10:43] +31.9s cut_energy opt=141792 shipped=141792 excess=+0.000%
+[07:10:43] +31.9s seam grid 340x410 nodes=29260
+[07:10:43] +32.1s cut_energy opt=2178869 shipped=2178869 excess=+0.000%
+[07:10:43] +32.1s seam refine nodes=29260
+[07:10:43] +32.1s painted
+[07:10:43] +32.1s mask blurred
+[07:10:43] +32.1s pyramid gauss
+[07:10:43] +32.2s pyramid expand
+[07:10:43] +32.2s pasted
+[07:10:43] +32.2s blended 8 keepA=0.73
+[07:10:43] +32.2s blend 9: window=3246x1694 tiles=1225
+[07:10:44] +32.6s local moved kept=426 field=15.86 disagree 0.3097 -> 0.1466
+[07:10:44] +32.7s seam grid 54x63 nodes=3122
+[07:10:44] +32.7s cut_energy opt=173187 shipped=173187 excess=+0.000%
+[07:10:44] +32.7s seam grid 403x479 nodes=49968
+[07:10:44] +32.9s cut_energy opt=1896042 shipped=1896042 excess=+0.000%
+[07:10:44] +32.9s seam refine nodes=49968
+[07:10:44] +32.9s painted
+[07:10:44] +32.9s mask blurred
+[07:10:44] +33.0s pyramid gauss
+[07:10:44] +33.2s pyramid expand
+[07:10:44] +33.2s pasted
+[07:10:44] +33.2s blended 9 keepA=0.44
+[07:10:44] +33.2s time  linear_photometry=8.10s
+[07:10:44] +33.2s photometry source=second compose
+[07:10:44] +33.2s save seam preview
+[07:10:44] +33.2s save cut fullres
+[07:10:44] +33.2s photometry gains=10
+[07:10:44] +33.2s photo pedestal=0.002654 field_norm=2.012343 gains=[0.9964 1.0341 0.9594 0.9558 1.0073 0.9939 1.0517 0.9702 1.0317 1.0043]
+[07:10:44] +33.2s save seam developed
+[07:10:44] +33.2s canvas perspective 25820x6819
+[07:10:45] +33.9s local align resolution 1/1
+[07:10:45] +33.9s composite levels=6 pad=512
+[07:10:45] +33.9s local alignment refine=false
+[07:10:46] +35.0s warped DSCF0571.RAF straight
+[07:10:48] +36.7s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.1335 (rejected)
+[07:10:48] +37.0s seam grid 171x206 nodes=34506
+[07:10:48] +37.3s cut_energy opt=293003 shipped=293003 excess=+0.000%
+[07:10:48] +37.4s seam grid 1340x1621 nodes=143628
+[07:10:50] +39.2s cut_energy opt=5049182 shipped=5049182 excess=+0.000%
+[07:10:50] +39.3s seam refine nodes=143628
+[07:10:50] +39.3s painted
+[07:10:50] +39.4s mask blurred
+[07:10:52] +41.2s pyramid gauss
+[07:10:53] +42.3s pyramid expand
+[07:10:53] +42.4s blended
+[07:10:53] +42.4s seam 1 window=9002x6057 keepA=0.70
+[07:10:53] +42.4s warped DSCF0572.RAF nudged
+[07:10:55] +44.3s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0850 (rejected)
+[07:10:55] +44.6s seam grid 173x211 nodes=35965
+[07:10:56] +44.9s cut_energy opt=338902 shipped=338902 excess=+0.000%
+[07:10:56] +45.0s seam grid 1369x1658 nodes=185875
+[07:11:01] +49.7s cut_energy opt=3995339 shipped=3995339 excess=+0.000%
+[07:11:01] +49.7s seam refine nodes=185875
+[07:11:01] +49.8s painted
+[07:11:01] +49.9s mask blurred
+[07:11:03] +51.7s pyramid gauss
+[07:11:04] +52.8s pyramid expand
+[07:11:04] +52.9s blended
+[07:11:04] +52.9s seam 2 window=9428x6331 keepA=0.97
+[07:11:04] +52.9s warped DSCF0570.RAF nudged
+[07:11:06] +54.7s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0730 (rejected)
+[07:11:06] +55.0s seam grid 169x202 nodes=33627
+[07:11:06] +55.2s cut_energy opt=292929 shipped=292929 excess=+0.000%
+[07:11:06] +55.3s seam grid 1327x1586 nodes=130277
+[07:11:09] +58.0s cut_energy opt=4724105 shipped=4724105 excess=+0.000%
+[07:11:09] +58.0s seam refine nodes=130277
+[07:11:09] +58.0s painted
+[07:11:09] +58.1s mask blurred
+[07:11:11] +59.9s pyramid gauss
+[07:11:12] +60.9s pyramid expand
+[07:11:12] +61.1s blended
+[07:11:12] +61.1s seam 3 window=8879x6000 keepA=0.48
+[07:11:12] +61.1s warped DSCF0573.RAF nudged
+[07:11:14] +63.1s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0936 (rejected)
+[07:11:14] +63.5s seam grid 180x218 nodes=38312
+[07:11:15] +63.8s cut_energy opt=296866 shipped=296866 excess=+0.000%
+[07:11:15] +63.9s seam grid 1417x1720 nodes=196037
+[07:11:18] +66.9s cut_energy opt=3128514 shipped=3128514 excess=+0.000%
+[07:11:18] +66.9s seam refine nodes=196037
+[07:11:18] +66.9s painted
+[07:11:18] +67.1s mask blurred
+[07:11:20] +69.1s pyramid gauss
+[07:11:21] +70.4s pyramid expand
+[07:11:21] +70.5s blended
+[07:11:21] +70.5s seam 4 window=9805x6488 keepA=0.21
+[07:11:21] +70.5s warped DSCF0569.RAF nudged
+[07:11:24] +72.8s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0395 (rejected)
+[07:11:24] +73.2s seam grid 187x233 nodes=41758
+[07:11:24] +73.5s cut_energy opt=186468 shipped=186468 excess=+0.000%
+[07:11:24] +73.6s seam grid 1468x1834 nodes=174134
+[07:11:27] +75.8s cut_energy opt=1945055 shipped=1945055 excess=+0.000%
+[07:11:27] +75.8s seam refine nodes=174134
+[07:11:27] +75.8s painted
+[07:11:27] +76.0s mask blurred
+[07:11:29] +78.2s pyramid gauss
+[07:11:30] +79.6s pyramid expand
+[07:11:31] +79.7s blended
+[07:11:31] +79.7s seam 5 window=10271x6667 keepA=0.61
+[07:11:31] +79.7s warped DSCF0568.RAF nudged
+[07:11:32] +81.5s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0943 (rejected)
+[07:11:33] +81.8s seam grid 165x195 nodes=32165
+[07:11:33] +82.0s cut_energy opt=343792 shipped=343792 excess=+0.000%
+[07:11:33] +82.1s seam grid 1294x1537 nodes=137053
+[07:11:34] +83.6s cut_energy opt=4700899 shipped=4700899 excess=+0.000%
+[07:11:34] +83.6s seam refine nodes=137053
+[07:11:35] +83.6s painted
+[07:11:35] +83.8s mask blurred
+[07:11:36] +85.4s pyramid gauss
+[07:11:37] +86.4s pyramid expand
+[07:11:37] +86.5s blended
+[07:11:37] +86.5s seam 6 window=8835x5876 keepA=0.84
+[07:11:37] +86.5s warped DSCF0574.RAF nudged
+[07:11:40] +88.8s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0707 (rejected)
+[07:11:40] +89.2s seam grid 194x248 nodes=45689
+[07:11:40] +89.6s cut_energy opt=278748 shipped=278748 excess=+0.000%
+[07:11:41] +89.8s seam grid 1522x1954 nodes=207615
+[07:11:44] +92.8s cut_energy opt=3346173 shipped=3346173 excess=+0.000%
+[07:11:44] +92.8s seam refine nodes=207615
+[07:11:44] +92.8s painted
+[07:11:44] +93.0s mask blurred
+[07:11:46] +95.3s pyramid gauss
+[07:11:48] +96.7s pyramid expand
+[07:11:48] +96.8s blended
+[07:11:48] +96.8s seam 7 window=10847x6819 keepA=0.62
+[07:11:48] +96.8s warped DSCF0567.RAF nudged
+[07:11:50] +98.6s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0690 (rejected)
+[07:11:50] +99.0s seam grid 168x203 nodes=33978
+[07:11:50] +99.2s cut_energy opt=383371 shipped=383371 excess=+0.000%
+[07:11:50] +99.3s seam grid 1320x1597 nodes=149418
+[07:11:53] +101.8s cut_energy opt=4159328 shipped=4159328 excess=+0.000%
+[07:11:53] +101.8s seam refine nodes=149418
+[07:11:53] +101.8s painted
+[07:11:53] +101.9s mask blurred
+[07:11:54] +103.6s pyramid gauss
+[07:11:55] +104.6s pyramid expand
+[07:11:56] +104.7s blended
+[07:11:56] +104.7s seam 8 window=8377x5873 keepA=0.75
+[07:11:56] +104.7s warped DSCF0575.RAF nudged
+[07:11:58] +106.9s field n=0 const=[1.0000 1.0000 1.0000] peak=0.0000 gain=-0.0837 (rejected)
+[07:11:58] +107.3s seam grid 200x238 nodes=45974
+[07:11:59] +107.9s cut_energy opt=315634 shipped=315634 excess=+0.000%
+[07:11:59] +108.0s seam grid 1572x1876 nodes=182777
+[07:12:02] +111.2s cut_energy opt=3784360 shipped=3784360 excess=+0.000%
+[07:12:02] +111.2s seam refine nodes=182777
+[07:12:02] +111.3s painted
+[07:12:02] +111.4s mask blurred
+[07:12:05] +113.7s pyramid gauss
+[07:12:06] +115.1s pyramid expand
+[07:12:06] +115.3s blended
+[07:12:06] +115.3s seam 9 window=11491x6819 keepA=0.56
+[07:12:06] +115.3s warped DSCF0566.RAF nudged
+[07:12:06] +115.3s refined shifts seams=0 mean_abs_shift=0.000px max_abs_shift=0.000px
+[07:12:06] +115.3s exposure gains applied 8
+[07:12:06] +115.5s save encode 25414x4991
+[07:12:16] +124.9s seam dump /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v51/DSCF0566/seams.txt
+[07:12:16] +124.9s blend_stage extract=0.00s
+[07:12:16] +124.9s blend_stage graphcut=31.19s
+[07:12:16] +124.9s blend_stage mask_blur=1.27s
+[07:12:16] +124.9s blend_stage pyr_blend=19.24s
+[07:12:16] +124.9s boundary_step final: n=9546 median_step=3.26% p90=43.80%
+[07:12:16] +124.9s blinds_flat  final: n=14388 median_step=1.93% p90=25.64%
+[07:12:16] +124.9s woodline    final: n=8623 median_step=9.81% p90=65.97%
+[07:12:16] +124.9s ghost_band   final: mean=0.710 keepA=0.64 cut_px=108348 swallowed=1
+[07:12:16] +124.9s sharpness_lapvar final: 9.591595215072697
+[07:12:16] +124.9s pano_mean_lum 0.05253268386760705 shadow_median 0.036066580563783646 canvas 25414x4991 levels=6 window_px=512
+[07:12:16] +124.9s time  final blend=70.78s encode_tiff=1.33s metrics=6.67s photometry=4.14s step_metrics=0.19s warp=4.85s
+[07:12:16] +124.9s time  total=124.90s
+[07:12:16] +124.9s saved /home/dalibor/Projects/RapidRAW/lean_pano_proto/out/v51/DSCF0566/DSCF0566_Pano.tiff
