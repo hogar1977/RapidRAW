@@ -2,6 +2,7 @@ use super::const_::{CANVAS_PX_CAP, WARP_PAD};
 use super::geom::{proj_forward, proj_inverse, Projection};
 use super::lens::LensModel;
 use nalgebra::{Matrix3, Vector3};
+use rayon::prelude::*;
 
 pub struct Placed {
     pub x0: i32,
@@ -92,6 +93,81 @@ pub fn warp_one(
             uv[i * 2] = ((mx - sw as f64 / 2.0) / hd) as f32;
             uv[i * 2 + 1] = ((my - sh as f64 / 2.0) / hd) as f32;
         }
+    }
+    Placed { x0: bx0, y0: by0, w: bw, h: bh, img, valid, uv }
+}
+
+// Same drawing as warp_one, with a canvas-pixel nudge applied before the source lookup.
+pub fn warp_one_nudged(
+    rgb: &[f32],
+    sw: u32,
+    sh: u32,
+    rot: &Matrix3<f64>,
+    f: f64,
+    lens: &LensModel,
+    geom: &CanvasGeom,
+    nudge: &(impl Fn(f64, f64) -> (f64, f64) + Sync),
+) -> Placed {
+    let ext = frame_extent(sw, sh, rot, f, lens, geom.projection);
+    let w = geom.width as i32;
+    let h = geom.height as i32;
+    let bx0 = ((ext.0 - geom.tmin) * f) as i32 - WARP_PAD;
+    let bx1 = ((ext.1 - geom.tmin) * f) as i32 + WARP_PAD + 1;
+    let by0 = ((ext.2 - geom.hmin) * f) as i32 - WARP_PAD;
+    let by1 = ((ext.3 - geom.hmin) * f) as i32 + WARP_PAD + 1;
+    let bx0 = bx0.clamp(0, w);
+    let bx1 = bx1.clamp(0, w);
+    let by0 = by0.clamp(0, h);
+    let by1 = by1.clamp(0, h);
+    let bw = (bx1 - bx0).max(0) as usize;
+    let bh = (by1 - by0).max(0) as usize;
+    let mut img = vec![0f32; bw * bh * 3];
+    let mut valid = vec![false; bw * bh];
+    let mut uv = vec![0f32; bw * bh * 2];
+    let rt = rot.transpose();
+    let hd = (sw as f64 * 0.5).hypot(sh as f64 * 0.5);
+    if bw > 0 && bh > 0 {
+        img.par_chunks_mut(bw * 3)
+            .zip(valid.par_chunks_mut(bw))
+            .zip(uv.par_chunks_mut(bw * 2))
+            .enumerate()
+            .for_each(|(y, ((row, flags), uvs))| {
+                if super::trace::halted() {
+                    return;
+                }
+                for x in 0..bw {
+                    let cx = (bx0 + x as i32) as f64;
+                    let cy = (by0 + y as i32) as f64;
+                    let (nx, ny) = nudge(cx, cy);
+                    let uu = (cx + nx) / f + geom.tmin;
+                    let vv = (cy + ny) / f + geom.hmin;
+                    let ray = proj_inverse(uu, vv, geom.projection);
+                    let cam = rt * ray;
+                    if cam.z <= 1e-6 {
+                        continue;
+                    }
+                    let mut dx = f * cam.x / cam.z;
+                    let mut dy = f * cam.y / cam.z;
+                    if !lens.is_identity() {
+                        let ru = dx.hypot(dy) / hd;
+                        let s = lens.forward_scale(ru.min(2.0));
+                        dx *= s;
+                        dy *= s;
+                    }
+                    let mx = dx + sw as f64 / 2.0;
+                    let my = dy + sh as f64 / 2.0;
+                    if mx < 0.0 || my < 0.0 || mx >= sw as f64 || my >= sh as f64 {
+                        continue;
+                    }
+                    let pix = sample(rgb, sw, sh, mx as f32, my as f32);
+                    row[x * 3] = pix[0];
+                    row[x * 3 + 1] = pix[1];
+                    row[x * 3 + 2] = pix[2];
+                    flags[x] = true;
+                    uvs[x * 2] = ((mx - sw as f64 / 2.0) / hd) as f32;
+                    uvs[x * 2 + 1] = ((my - sh as f64 / 2.0) / hd) as f32;
+                }
+            });
     }
     Placed { x0: bx0, y0: by0, w: bw, h: bh, img, valid, uv }
 }

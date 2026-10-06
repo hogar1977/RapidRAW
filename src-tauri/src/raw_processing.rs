@@ -12,6 +12,17 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+pub(crate) fn raw_orientation(file_bytes: &[u8]) -> Orientation {
+    let source = RawSource::new_from_slice(file_bytes);
+    let Ok(decoder) = rawler::get_decoder(&source) else {
+        return Orientation::Normal;
+    };
+    let Ok(metadata) = decoder.raw_metadata(&source, &RawDecodeParams::default()) else {
+        return Orientation::Normal;
+    };
+    metadata.exif.orientation.map(Orientation::from_u16).unwrap_or(Orientation::Normal)
+}
+
 pub fn develop_raw_image(
     file_bytes: &[u8],
     fast_demosaic: bool,

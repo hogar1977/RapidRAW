@@ -87,8 +87,15 @@ fn gauss9() -> [f32; 9] {
 
 // Blends two overlapping photos so the join fades instead of showing a hard edge.
 pub fn pyr_blend(a: &[f32], b: &[f32], mask: &[f32], va: &[bool], vb: &[bool], w: usize, h: usize, levels: usize) -> Vec<f32> {
-    let ga = gauss_pyr(a, va, w, h, levels);
-    let gb = gauss_pyr(b, vb, w, h, levels);
+    // v52: "leak" fix. A Laplacian band is `ga[i] - up(ga[i+1])`. Where ga[i]
+    // carries no data (validity coverage ~0, i.e. outside the warped frame) that
+    // difference still evaluates to `-up(ga[i+1])`: a negative residual emitted
+    // from a region we know nothing about, which upsampling then smears into
+    // neighbouring valid pixels as a dark rim. Gating the residual on the
+    // level's own validity refuses to invent a band where there is no data.
+    let no_leak = std::env::var("LEAN_BLEND_LEAK").map(|v| v != "0").unwrap_or(false);
+    let (ga, ka) = gauss_pyr(a, va, w, h, levels);
+    let (gb, kb) = gauss_pyr(b, vb, w, h, levels);
     super::trace::line("pyramid gauss");
     let mut gm = vec![mask.to_vec()];
     let mut mw = w;
@@ -105,8 +112,24 @@ pub fn pyr_blend(a: &[f32], b: &[f32], mask: &[f32], va: &[bool], vb: &[bool], w
         let (aw, ah) = ga[i].1;
         let up_a = pyr_up(&ga[i + 1].0, ga[i + 1].1 .0, ga[i + 1].1 .1, aw, ah);
         let up_b = pyr_up(&gb[i + 1].0, gb[i + 1].1 .0, gb[i + 1].1 .1, aw, ah);
-        la.push(sub(&ga[i].0, &up_a));
-        lb.push(sub(&gb[i].0, &up_b));
+        let (mut ra, mut rb) = (sub(&ga[i].0, &up_a), sub(&gb[i].0, &up_b));
+        if no_leak {
+            // suppress the residual wherever that level has no data
+            for k in 0..aw * ah {
+                if !ka[i][k] {
+                    for c in 0..3 {
+                        ra[k * 3 + c] = 0.0;
+                    }
+                }
+                if !kb[i][k] {
+                    for c in 0..3 {
+                        rb[k * 3 + c] = 0.0;
+                    }
+                }
+            }
+        }
+        la.push(ra);
+        lb.push(rb);
     }
     la.push(ga.last().unwrap().0.clone());
     lb.push(gb.last().unwrap().0.clone());
@@ -127,7 +150,7 @@ pub fn blend_levels(w: u32, h: u32, lo: i32, hi: i32) -> usize {
     v.clamp(lo, hi) as usize
 }
 
-fn gauss_pyr(img: &[f32], valid: &[bool], w: usize, h: usize, levels: usize) -> Vec<(Vec<f32>, (usize, usize))> {
+fn gauss_pyr(img: &[f32], valid: &[bool], w: usize, h: usize, levels: usize) -> (Vec<(Vec<f32>, (usize, usize))>, Vec<Vec<bool>>) {
     let mut num = vec![0f32; img.len()];
     let mut den = vec![0f32; valid.len()];
     for i in 0..valid.len() {
@@ -150,20 +173,54 @@ fn gauss_pyr(img: &[f32], valid: &[bool], w: usize, h: usize, levels: usize) -> 
         dens.push(d);
     }
     let mut g = Vec::new();
-    for (n, d) in nums.iter().zip(dens.iter()) {
+    let mut kmask = Vec::new();
+    // v52: prevention-first probe. A pyramid cell whose validity coverage is
+    // genuinely ~zero has no data to extrapolate, but leaving it black makes
+    // every finer Laplacian band `ga[i] - up(ga[i+1])` carry a negative spike,
+    // which is the dark rim along a frame boundary. Report how much of each
+    // level is actually affected before deciding how to treat it.
+    let dump_den = std::env::var("LEAN_BLEND_DEN_DUMP").is_ok();
+    let inpaint = match std::env::var("LEAN_BLEND_INPAINT").ok().as_deref() {
+        Some("0") | None => 0u8,
+        Some("full") => 2,
+        _ => 1, // coarsest level only
+    };
+    for (li, (n, d)) in nums.iter().zip(dens.iter()).enumerate() {
         let (nw, nh) = n.1;
         let mut o = vec![0f32; nw * nh * 3];
+        let mut known = vec![false; nw * nh];
+        let mut zero = 0usize;
         for i in 0..nw * nh {
             if d[i] > BLEND_DEN {
                 let s = 1.0 / d[i].max(BLEND_DEN);
                 o[i * 3] = n.0[i * 3] * s;
                 o[i * 3 + 1] = n.0[i * 3 + 1] * s;
                 o[i * 3 + 2] = n.0[i * 3 + 2] * s;
+                known[i] = true;
+            } else {
+                zero += 1;
             }
         }
+        if dump_den {
+            let tot = nw * nh;
+            let mean_d: f32 = d.iter().sum::<f32>() / tot as f32;
+            super::trace::line(&format!(
+                "BENDEN level={li} {nw}x{nh} zero={zero} ({:.3}%) den_mean={mean_d:.5}",
+                100.0 * zero as f32 / tot as f32
+            ));
+        }
+        // Cheapest effective target is the coarsest level: the rim originates
+        // there, and finer levels rarely have whole cells at zero coverage.
+        let coarsest = li + 1 == nums.len();
+        let do_it = inpaint == 2 || (inpaint == 1 && coarsest);
+        if do_it && zero > 0 {
+            let passes = if inpaint == 2 { 256 } else { 32 };
+            inpaint_holes(&mut o, &known, nw, nh, passes);
+        }
         g.push((o, (nw, nh)));
+        kmask.push(known);
     }
-    g
+    (g, kmask)
 }
 
 const TAP: [f32; 5] = [1.0, 4.0, 6.0, 4.0, 1.0];
@@ -367,6 +424,56 @@ fn sub(a: &[f32], b: &[f32]) -> Vec<f32> {
 fn add(a: &[f32], b: &[f32]) -> Vec<f32> {
     a.iter().zip(b.iter()).map(|(p, q)| p + q).collect()
 }
+/// Fill unknown pyramid cells by diffusing known neighbours inward.
+///
+/// `pyr_blend` builds Laplacian bands as `ga[i] - up(ga[i+1])`, so a coarse
+/// level that is black wherever source coverage was thin produces a large
+/// negative step in every finer band - a dark rim along each frame boundary.
+/// Growing the valid values outward by neighbour averaging keeps the coarse
+/// levels continuous, so the residual is a genuine detail difference rather
+/// than a black-fill artefact.
+fn inpaint_holes(o: &mut [f32], known: &[bool], w: usize, h: usize, max_passes: usize) {
+    if w < 3 || h < 3 {
+        return;
+    }
+    let mut known = known.to_vec();
+    let mut buf = o.to_vec();
+    const NEIGH: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+    for _ in 0..max_passes {
+        let mut progress = false;
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let i = y * w + x;
+                if known[i] {
+                    continue;
+                }
+                let mut acc = [0f32; 3];
+                let mut n = 0f32;
+                for (dx, dy) in NEIGH {
+                    let j = ((y as i32 + dy) * w as i32 + (x as i32 + dx)) as usize;
+                    if known[j] {
+                        for c in 0..3 {
+                            acc[c] += buf[j * 3 + c];
+                        }
+                        n += 1.0;
+                    }
+                }
+                if n > 0.0 {
+                    for c in 0..3 {
+                        buf[i * 3 + c] = acc[c] / n;
+                    }
+                    known[i] = true;
+                    progress = true;
+                }
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
+    o.copy_from_slice(&buf);
+}
+
 fn mix(a: &[f32], b: &[f32], m: &[f32], w: usize) -> Vec<f32> {
     let n = m.len();
     let mut o = vec![0f32; n * 3];

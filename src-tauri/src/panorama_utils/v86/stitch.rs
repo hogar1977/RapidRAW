@@ -132,7 +132,7 @@ pub fn stitch(
 // Shrinks each photo so a later warp can use a smaller canvas.
 pub fn shrink_frames(frames: &[InputFrame], long_side: u32) -> Vec<InputFrame> {
     frames
-        .iter()
+        .par_iter()
         .map(|frame| {
             let (dw, dh) = fit_long_side(frame.width, frame.height, long_side);
             if dw == frame.width && dh == frame.height {
@@ -143,8 +143,12 @@ pub fn shrink_frames(frames: &[InputFrame], long_side: u32) -> Vec<InputFrame> {
                     rgb: frame.rgb.clone(),
                 };
             }
-            let img = Rgb32FImage::from_raw(frame.width, frame.height, frame.rgb.clone()).unwrap_or_else(|| Rgb32FImage::new(frame.width, frame.height));
-            let small = image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle);
+            let small = if let Some(view) = image::ImageBuffer::<image::Rgb<f32>, &[f32]>::from_raw(frame.width, frame.height, frame.rgb.as_slice()) {
+                image::imageops::resize(&view, dw, dh, image::imageops::FilterType::Triangle)
+            } else {
+                let owned = Rgb32FImage::from_raw(frame.width, frame.height, frame.rgb.clone()).unwrap_or_else(|| Rgb32FImage::new(frame.width, frame.height));
+                image::imageops::resize(&owned, dw, dh, image::imageops::FilterType::Triangle)
+            };
             InputFrame { name: frame.name.clone(), width: dw, height: dh, rgb: small.into_raw() }
         })
         .collect()
@@ -503,6 +507,7 @@ fn composite(
         if x1 <= x0 || y1 <= y0 {
             placed[bi].img = Vec::new();
             placed[bi].valid = Vec::new();
+            super::local_align::commit_shift(x0 as i32, y0 as i32);
             continue;
         }
         let ww = x1 - x0;
@@ -515,6 +520,7 @@ fn composite(
         let lum_b = plane_luma(&bw);
         trace::gate()?;
         let (bw, bv) = align_incoming(&lum_a, &lum_b, &av, bv, bw, ww, hh);
+        super::local_align::commit_shift(x0 as i32, y0 as i32);
         trace::gate()?;
         let lum_b = plane_luma(&bw);
         let hard = graphcut_mask(&lum_a, &lum_b, &av, &bv, ww, hh);
@@ -530,20 +536,45 @@ fn composite(
         let keep_a = if keep_n == 0 { 1.0 } else { keep_sum / keep_n as f64 };
         let soft = blur_mask(&hard, ww, hh);
         trace::line("mask blurred");
-        let blended = pyr_blend(&aw, &bw, &soft, &av, &bv, ww, hh, levels);
+        let (sx0, sy0, sx1, sy1) = blend_rect(&av, &bv, ww, hh, pad);
+        let cw = sx1 - sx0;
+        let ch = sy1 - sy0;
+        let blended = if cw == ww && ch == hh {
+            pyr_blend(&aw, &bw, &soft, &av, &bv, ww, hh, levels)
+        } else {
+            pyr_blend(
+                &take_rect_rgb(&aw, ww, sx0, sy0, sx1, sy1),
+                &take_rect_rgb(&bw, ww, sx0, sy0, sx1, sy1),
+                &take_rect_f32(&soft, ww, sx0, sy0, sx1, sy1),
+                &take_rect_bool(&av, ww, sx0, sy0, sx1, sy1),
+                &take_rect_bool(&bv, ww, sx0, sy0, sx1, sy1),
+                cw,
+                ch,
+                levels,
+            )
+        };
         for y in 0..hh {
             for x in 0..ww {
                 let s = y * ww + x;
+                if !(av[s] || bv[s]) {
+                    continue;
+                }
+                let inside = x >= sx0 && x < sx1 && y >= sy0 && y < sy1;
+                let (p0, p1, p2) = if inside {
+                    let cs = (y - sy0) * cw + (x - sx0);
+                    (blended[cs * 3], blended[cs * 3 + 1], blended[cs * 3 + 2])
+                } else if bv[s] {
+                    (bw[s * 3], bw[s * 3 + 1], bw[s * 3 + 2])
+                } else {
+                    continue;
+                };
                 let d = (y0 + y) * w + x0 + x;
-                let union = av[s] || bv[s];
-                if union {
-                    acc[d * 3] = blended[s * 3];
-                    acc[d * 3 + 1] = blended[s * 3 + 1];
-                    acc[d * 3 + 2] = blended[s * 3 + 2];
-                    accm[d] = true;
-                    if bv[s] && (!av[s] || hard[s] < 0.5) {
-                        winners[d] = bi as u16;
-                    }
+                acc[d * 3] = p0;
+                acc[d * 3 + 1] = p1;
+                acc[d * 3 + 2] = p2;
+                accm[d] = true;
+                if bv[s] && (!av[s] || hard[s] < 0.5) {
+                    winners[d] = bi as u16;
                 }
             }
         }
@@ -582,9 +613,9 @@ fn window(p: &warp::Placed, acc: &[f32], accm: &[bool], x0: usize, y0: usize, x1
     let mut a = vec![0f32; ww * hh * 3];
     let mut av = vec![false; ww * hh];
     for y in 0..hh {
+        let cy = y0 + y;
         for x in 0..ww {
             let cx = x0 + x;
-            let cy = y0 + y;
             let di = y * ww + x;
             let ai = cy * canvas_w + cx;
             a[di * 3] = acc[ai * 3];
@@ -616,6 +647,72 @@ fn plane_luma(rgb: &[f32]) -> Vec<f32> {
     o
 }
 
+// Keeps the multiband blend on the overlap plus the same padding the full window already used.
+fn blend_rect(av: &[bool], bv: &[bool], w: usize, h: usize, pad: usize) -> (usize, usize, usize, usize) {
+    let mut x0 = w;
+    let mut y0 = h;
+    let mut x1 = 0usize;
+    let mut y1 = 0usize;
+    for y in 0..h {
+        let row = y * w;
+        for x in 0..w {
+            if av[row + x] && bv[row + x] {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x + 1);
+                y1 = y1.max(y + 1);
+            }
+        }
+    }
+    if x1 <= x0 || y1 <= y0 {
+        return (0, 0, w, h);
+    }
+    let sx0 = x0.saturating_sub(pad);
+    let sy0 = y0.saturating_sub(pad);
+    let sx1 = (x1 + pad).min(w);
+    let sy1 = (y1 + pad).min(h);
+    if (sx1 - sx0) * (sy1 - sy0) * 10 > w * h * 9 {
+        (0, 0, w, h)
+    } else {
+        (sx0, sy0, sx1, sy1)
+    }
+}
+
+fn take_rect_rgb(src: &[f32], w: usize, x0: usize, y0: usize, x1: usize, y1: usize) -> Vec<f32> {
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut o = vec![0f32; cw * ch * 3];
+    for y in 0..ch {
+        let s = ((y0 + y) * w + x0) * 3;
+        let d = y * cw * 3;
+        o[d..d + cw * 3].copy_from_slice(&src[s..s + cw * 3]);
+    }
+    o
+}
+
+fn take_rect_f32(src: &[f32], w: usize, x0: usize, y0: usize, x1: usize, y1: usize) -> Vec<f32> {
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut o = vec![0f32; cw * ch];
+    for y in 0..ch {
+        let s = (y0 + y) * w + x0;
+        let d = y * cw;
+        o[d..d + cw].copy_from_slice(&src[s..s + cw]);
+    }
+    o
+}
+
+fn take_rect_bool(src: &[bool], w: usize, x0: usize, y0: usize, x1: usize, y1: usize) -> Vec<bool> {
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut o = vec![false; cw * ch];
+    for y in 0..ch {
+        let s = (y0 + y) * w + x0;
+        o[y * cw..(y + 1) * cw].copy_from_slice(&src[s..s + cw]);
+    }
+    o
+}
+
 fn detect_all(frames: &[InputFrame], progress: &dyn Fn(&str)) -> Result<Vec<Vec<Feature>>, String> {
     progress("Finding points...");
     let log = trace::current();
@@ -634,6 +731,10 @@ fn detect_all(frames: &[InputFrame], progress: &dyn Fn(&str)) -> Result<Vec<Vec<
         trace::line(&format!("points {}/{} {}: {}", i + 1, frames.len(), frame.name, found[i].len()));
     }
     Ok(found)
+}
+
+pub fn find_points(frame: &InputFrame) -> Vec<Feature> {
+    detect_one(frame)
 }
 
 fn detect_one(frame: &InputFrame) -> Vec<Feature> {

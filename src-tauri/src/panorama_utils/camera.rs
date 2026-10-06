@@ -283,11 +283,23 @@ pub fn parse_focal_mm_35eq(exif: &HashMap<String, String>) -> f64 {
     candidate.and_then(sanitize_focal_mm_35eq).unwrap_or(DEFAULT_FOCAL_MM_35EQ)
 }
 
-fn parse_focal_mm_native(exif: &HashMap<String, String>) -> f64 {
+/// True focal length in millimetres, read from the EXIF `FocalLength` tag.
+///
+/// This tag is an EXIF `Rational`, so it carries 0.1 mm precision - unlike
+/// `FocalLengthIn35mmFilm`, which is a `Short` and therefore whole millimetres.
+/// On DSCF0566 they read 70.2 and 105 respectively, the latter rounded from an
+/// exact 70.2 * 1.53392 = 107.68.
+///
+/// Returns `None` when the tag is absent or implausible, so callers can pick
+/// their own fallback rather than silently getting a lossy substitute.
+pub fn focal_mm_native(exif: &HashMap<String, String>) -> Option<f64> {
     exif.get("FocalLength")
         .and_then(|s| parse_mm(s))
-        .filter(|v| *v > 1.0)
-        .unwrap_or_else(|| parse_focal_mm_35eq(exif))
+        .filter(|v| *v > 1.0 && v.is_finite())
+}
+
+fn parse_focal_mm_native(exif: &HashMap<String, String>) -> f64 {
+    focal_mm_native(exif).unwrap_or_else(|| parse_focal_mm_35eq(exif))
 }
 
 /// Always-on lens profile for panorama (ignores editor lensDistortionEnabled).

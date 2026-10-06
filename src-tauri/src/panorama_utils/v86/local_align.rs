@@ -1,4 +1,74 @@
 use rayon::prelude::*;
+use std::cell::RefCell;
+
+pub struct RecordedShift {
+    pub x: i32,
+    pub y: i32,
+    pub w: usize,
+    pub h: usize,
+    pub dx: Vec<f32>,
+    pub dy: Vec<f32>,
+}
+
+thread_local! {
+    static RECORD_SHIFTS: RefCell<bool> = const { RefCell::new(false) };
+    static STAGED_SHIFT: RefCell<Option<RecordedShift>> = const { RefCell::new(None) };
+    static SHIFT_LOG: RefCell<Vec<Option<RecordedShift>>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn begin_shift_log() {
+    RECORD_SHIFTS.with(|flag| *flag.borrow_mut() = true);
+    STAGED_SHIFT.with(|slot| *slot.borrow_mut() = None);
+    SHIFT_LOG.with(|log| log.borrow_mut().clear());
+}
+
+pub fn end_shift_log() -> Vec<Option<RecordedShift>> {
+    RECORD_SHIFTS.with(|flag| *flag.borrow_mut() = false);
+    SHIFT_LOG.with(|log| std::mem::take(&mut *log.borrow_mut()))
+}
+
+pub fn commit_shift(origin_x: i32, origin_y: i32) {
+    let recording = RECORD_SHIFTS.with(|flag| *flag.borrow());
+    if !recording {
+        return;
+    }
+    let staged = STAGED_SHIFT.with(|slot| slot.borrow_mut().take());
+    SHIFT_LOG.with(|log| {
+        log.borrow_mut().push(staged.map(|shift| RecordedShift {
+            x: origin_x + shift.x,
+            y: origin_y + shift.y,
+            w: shift.w,
+            h: shift.h,
+            dx: shift.dx,
+            dy: shift.dy,
+        }));
+    });
+}
+
+fn clear_staged_shift() {
+    STAGED_SHIFT.with(|slot| *slot.borrow_mut() = None);
+}
+
+fn stage_shift(x0: usize, y0: usize, x1: usize, y1: usize, field_x: &[f32], field_y: &[f32], w: usize) {
+    let recording = RECORD_SHIFTS.with(|flag| *flag.borrow());
+    if !recording || x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut dx = vec![0f32; cw * ch];
+    let mut dy = vec![0f32; cw * ch];
+    for y in 0..ch {
+        for x in 0..cw {
+            let s = (y0 + y) * w + x0 + x;
+            dx[y * cw + x] = field_x[s];
+            dy[y * cw + x] = field_y[s];
+        }
+    }
+    STAGED_SHIFT.with(|slot| {
+        *slot.borrow_mut() = Some(RecordedShift { x: x0 as i32, y: y0 as i32, w: cw, h: ch, dx, dy });
+    });
+}
 
 // Nudges the new photo so its overlap sits on the picture already built.
 pub fn align_incoming(
@@ -10,6 +80,7 @@ pub fn align_incoming(
     w: usize,
     h: usize,
 ) -> (Vec<f32>, Vec<bool>) {
+    clear_staged_shift();
     let tile = 128usize;
     let both: Vec<bool> = va.iter().zip(vb.iter()).map(|(a, b)| *a && *b).collect();
     if both.iter().filter(|v| **v).count() < tile * tile {
@@ -102,6 +173,24 @@ pub fn align_incoming(
         wt[i * gx..(i + 1) * gx].copy_from_slice(&rw);
     }
     let kept = wt.iter().filter(|v| **v > 0.0).count();
+    // v39 DIAGNOSTIC (debug only, inert unless LEAN_ALIGN_DUMP=1): dump the
+    // per-tile votes and the smoothed field so a fitted field that ramps across
+    // the window can be traced to either thin tile coverage (wt -> 0) or to the
+    // ridge term shrinking unmeasured cells toward zero.
+    if std::env::var("LEAN_ALIGN_DUMP").is_ok() {
+        let cys_txt: Vec<String> = cys.iter().map(|v| v.to_string()).collect();
+        let cxs_txt: Vec<String> = cxs.iter().map(|v| v.to_string()).collect();
+        super::trace::line(&format!("DUMP grid gy={gy} gx={gx} kept={kept} total={}", gy * gx));
+        super::trace::line(&format!("DUMP cys=[{}]", cys_txt.join(",")));
+        super::trace::line(&format!("DUMP cxs=[{}]", cxs_txt.join(",")));
+        super::trace::line(&format!("DUMP stride={stride} tile={tile} max_shift={max_shift}"));
+        for i in 0..gy {
+            let row_wt: Vec<String> = (0..gx).map(|j| format!("{:.3}", wt[i * gx + j])).collect();
+            let row_fx: Vec<String> = (0..gx).map(|j| format!("{:.3}", fx[i * gx + j])).collect();
+            super::trace::line(&format!("DUMP row {i} wt=[{}]", row_wt.join(",")));
+            super::trace::line(&format!("DUMP row {i} fx=[{}]", row_fx.join(",")));
+        }
+    }
     if kept < 4 {
         super::trace::line(&format!("local copied too few kept={kept}"));
         return (img, vb);
@@ -118,49 +207,129 @@ pub fn align_incoming(
         gx_f[i] = num_x[i] / (den[i] + lam);
         gy_f[i] = num_y[i] / (den[i] + lam);
     }
-    let dist = outside_distance(&both, w, h);
-    let mut field_x = vec![0f32; w * h];
-    let mut field_y = vec![0f32; w * h];
-    let mut move_px = vec![false; w * h];
-    field_x
-        .par_chunks_mut(w)
-        .zip(field_y.par_chunks_mut(w))
-        .zip(move_px.par_chunks_mut(w))
-        .enumerate()
-        .for_each(|(y, ((fx_row, fy_row), move_row))| {
-            for x in 0..w {
-                let mapx = (x as f32 - (x0 as f32 + tile as f32 / 2.0)) / stride as f32;
-                let mapy = (y as f32 - (y0 as f32 + tile as f32 / 2.0)) / stride as f32;
-                let mut sx = sample_grid(&gx_f, gx, gy, mapx, mapy);
-                let mut sy = sample_grid(&gy_f, gx, gy, mapx, mapy);
-                let taper = if vb[y * w + x] {
-                    (1.0 - dist[y * w + x] / tile as f32).clamp(0.0, 1.0)
+    if std::env::var("LEAN_ALIGN_DUMP").is_ok() {
+        super::trace::line(&format!("DUMP lam={lam:.5} den_min={:.4} den_max={:.4}", {
+            let mn = den.iter().cloned().fold(f32::INFINITY, f32::min);
+            let mx = den.iter().cloned().fold(0.0f32, f32::max);
+            let _ = (mn, mx);
+            mn
+        }, {
+            den.iter().cloned().fold(0.0f32, f32::max)
+        }));
+        for i in 0..gy {
+            let row_den: Vec<String> = (0..gx).map(|j| format!("{:.4}", den[i * gx + j])).collect();
+            let row_fit: Vec<String> = (0..gx).map(|j| format!("{:.3}", gx_f[i * gx + j])).collect();
+            super::trace::line(&format!("DUMP row {i} den=[{}]", row_den.join(",")));
+            super::trace::line(&format!("DUMP row {i} fit=[{}]", row_fit.join(",")));
+        }
+    }
+    // v51 DIAGNOSTIC (inert unless LEAN_ALIGN_RESID=1): for every measured
+    // grid cell dump (a) the residual between the raw per-tile shift vote and
+    // the smoothed+regularised fit, and (b) the local image gradient at that
+    // cell centre. Parallax makes the true displacement field discontinuous at
+    // depth boundaries, so if the smoothness fit is the defect the residual
+    // should concentrate on high-gradient cells (building silhouettes, ridgeline)
+    // and stay near zero inside a single depth layer.
+    if std::env::var("LEAN_ALIGN_RESID").is_ok() {
+        super::trace::line(&format!(
+            "RESID win y0={y0} y1={y1} x0={x0} x1={x1} gy={gy} gx={gx} tile={tile} stride={stride} img={w}x{h}"
+        ));
+        let cys_txt: Vec<String> = cys.iter().map(|v| v.to_string()).collect();
+        let cxs_txt: Vec<String> = cxs.iter().map(|v| v.to_string()).collect();
+        super::trace::line(&format!("RESID cys=[{}]", cys_txt.join(",")));
+        super::trace::line(&format!("RESID cxs=[{}]", cxs_txt.join(",")));
+        for i in 0..gy {
+            let cy = cys[i];
+            let mut rr: Vec<String> = Vec::with_capacity(gx);
+            let mut gg: Vec<String> = Vec::with_capacity(gx);
+            let mut ff: Vec<String> = Vec::with_capacity(gx);
+            let mut yy: Vec<String> = Vec::with_capacity(gx);
+            let mut mm: Vec<String> = Vec::with_capacity(gx);
+            let half = tile / 2;
+            for j in 0..gx {
+                let k = i * gx + j;
+                let dxv = fx[k] - gx_f[k];
+                let dyv = fy[k] - gy_f[k];
+                let r = (dxv * dxv + dyv * dyv).sqrt();
+                let cxj = cxs[j];
+                let gmag = if cy >= 1 && cxj >= 1 && cy + 1 < h && cxj + 1 < w {
+                    sobel_mag(&img, w, h, cy, cxj)
                 } else {
                     0.0
                 };
-                sx = (sx * taper).clamp(-(max_shift as f32), max_shift as f32);
-                sy = (sy * taper).clamp(-(max_shift as f32), max_shift as f32);
-                fx_row[x] = sx;
-                fy_row[x] = sy;
-                move_row[x] = sx.hypot(sy) > 0.2;
+                // mean incoming intensity over the tile at this cell, so cells can
+                // be split into near-structure vs far-background populations
+                let ty0 = cy.saturating_sub(half);
+                let tx0 = cxj.saturating_sub(half);
+                let ty1 = (cy + half).min(h);
+                let tx1 = (cxj + half).min(w);
+                let mut acc = 0f64;
+                let mut cnt = 0f64;
+                for y2 in ty0..ty1 {
+                    let base = y2 * w;
+                    for x2 in tx0..tx1 {
+                        acc += img[base + x2] as f64;
+                        cnt += 1.0;
+                    }
+                }
+                let mi = if cnt > 0.0 { (acc / cnt) as f32 } else { 0.0 };
+                rr.push(format!("{:.4}", r));
+                gg.push(format!("{:.4}", gmag));
+                ff.push(format!("{:.4}", fx[k]));
+                yy.push(format!("{:.4}", fy[k]));
+                mm.push(format!("{:.2}", mi));
             }
-        });
-    let field_max = field_x.iter().zip(field_y.iter()).map(|(x, y)| x.hypot(*y)).fold(0.0f32, f32::max);
+            super::trace::line(&format!("RESID row {i} r=[{}]", rr.join(",")));
+            super::trace::line(&format!("RESID row {i} g=[{}]", gg.join(",")));
+            super::trace::line(&format!("RESID row {i} fx=[{}]", ff.join(",")));
+            super::trace::line(&format!("RESID row {i} fy=[{}]", yy.join(",")));
+            super::trace::line(&format!("RESID row {i} m=[{}]", mm.join(",")));
+            let row_w: Vec<String> = (0..gx).map(|j| format!("{:.4}", wt[i * gx + j])).collect();
+            super::trace::line(&format!("RESID row {i} w=[{}]", row_w.join(",")));
+        }
+    }
+    let margin = tile * 2;
+    let zy0 = y0.saturating_sub(margin);
+    let zx0 = x0.saturating_sub(margin);
+    let zy1 = (y1 + margin).min(h);
+    let zx1 = (x1 + margin).min(w);
+    let dist = distance_near_overlap(&both, w, h, zy0, zx0, zy1, zx1);
+    let mut field_x = vec![0f32; w * h];
+    let mut field_y = vec![0f32; w * h];
+    let mut move_px = vec![false; w * h];
+    let mut field_max = 0.0f32;
+    for y in zy0..zy1 {
+        for x in zx0..zx1 {
+            let mapx = (x as f32 - (x0 as f32 + tile as f32 / 2.0)) / stride as f32;
+            let mapy = (y as f32 - (y0 as f32 + tile as f32 / 2.0)) / stride as f32;
+            let mut sx = sample_grid(&gx_f, gx, gy, mapx, mapy);
+            let mut sy = sample_grid(&gy_f, gx, gy, mapx, mapy);
+            let i = y * w + x;
+            let taper = if vb[i] { (1.0 - dist[i] / tile as f32).clamp(0.0, 1.0) } else { 0.0 };
+            sx = (sx * taper).clamp(-(max_shift as f32), max_shift as f32);
+            sy = (sy * taper).clamp(-(max_shift as f32), max_shift as f32);
+            field_x[i] = sx;
+            field_y[i] = sy;
+            let mag = sx.hypot(sy);
+            field_max = field_max.max(mag);
+            move_px[i] = mag > 0.2;
+        }
+    }
     if !move_px.iter().any(|v| *v) {
         super::trace::line(&format!("local copied under 0.2 kept={kept} field={field_max:.2}"));
         return (img, vb);
     }
     let mut out = img.to_vec();
     let mut ov = vb.to_vec();
-    for y in 0..h {
-        for x in 0..w {
-            if !move_px[y * w + x] {
+    for y in zy0..zy1 {
+        for x in zx0..zx1 {
+            let i = y * w + x;
+            if !move_px[i] {
                 continue;
             }
-            let sx = x as f32 + field_x[y * w + x];
-            let sy = y as f32 + field_y[y * w + x];
+            let sx = x as f32 + field_x[i];
+            let sy = y as f32 + field_y[i];
             let pix = cubic_rgb(&img, w, h, sx, sy);
-            let i = y * w + x;
             out[i * 3] = pix[0];
             out[i * 3 + 1] = pix[1];
             out[i * 3 + 2] = pix[2];
@@ -173,6 +342,7 @@ pub fn align_incoming(
         return (img, vb);
     }
     super::trace::line(&format!("local moved kept={kept} field={field_max:.2} disagree {d0:.4} -> {d1:.4}"));
+    stage_shift(zx0, zy0, zx1, zy1, &field_x, &field_y, w);
     (out, ov)
 }
 
@@ -585,34 +755,62 @@ fn outside_distance(inside: &[bool], w: usize, h: usize) -> Vec<f32> {
 fn cubic_rgb(img: &[f32], w: usize, h: usize, x: f32, y: f32) -> [f32; 3] {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
+    let wx = cubic_w(x - x0 as f32);
+    let wy = cubic_w(y - y0 as f32);
     let mut o = [0f32; 3];
-    for c in 0..3 {
-        let mut col = [0f32; 4];
-        for ky in 0..4 {
-            let yy = (y0 - 1 + ky as i32).clamp(0, h as i32 - 1) as usize;
-            let mut row = [0f32; 4];
-            for kx in 0..4 {
-                let xx = (x0 - 1 + kx as i32).clamp(0, w as i32 - 1) as usize;
-                row[kx] = img[(yy * w + xx) * 3 + c];
-            }
-            col[ky] = keys(row, fx);
+    for ky in 0..4 {
+        let yy = (y0 - 1 + ky as i32).clamp(0, h as i32 - 1) as usize;
+        let wyy = wy[ky];
+        for kx in 0..4 {
+            let xx = (x0 - 1 + kx as i32).clamp(0, w as i32 - 1) as usize;
+            let weight = wyy * wx[kx];
+            let p = (yy * w + xx) * 3;
+            o[0] += img[p] * weight;
+            o[1] += img[p + 1] * weight;
+            o[2] += img[p + 2] * weight;
         }
-        o[c] = keys(col, fy);
     }
     o
 }
 
-fn keys(p: [f32; 4], t: f32) -> f32 {
+fn cubic_w(t: f32) -> [f32; 4] {
     let a = -0.5f32;
     let t2 = t * t;
     let t3 = t2 * t;
-    let w0 = a * (t3 - 2.0 * t2 + t);
-    let w1 = (a + 2.0) * t3 - (a + 3.0) * t2 + 1.0;
-    let w2 = -(a + 2.0) * t3 + (2.0 * a + 3.0) * t2 - a * t;
-    let w3 = a * (-t3 + t2);
-    w0 * p[0] + w1 * p[1] + w2 * p[2] + w3 * p[3]
+    [
+        a * (t3 - 2.0 * t2 + t),
+        (a + 2.0) * t3 - (a + 3.0) * t2 + 1.0,
+        -(a + 2.0) * t3 + (2.0 * a + 3.0) * t2 - a * t,
+        a * (-t3 + t2),
+    ]
+}
+
+fn sobel_mag(lum: &[f32], w: usize, h: usize, y: usize, x: usize) -> f32 {
+    let at = |yy: i32, xx: i32| lum[reflect101(yy, h as i32) as usize * w + reflect101(xx, w as i32) as usize];
+    let yy = y as i32;
+    let xx = x as i32;
+    let gx = -at(yy - 1, xx - 1) + at(yy - 1, xx + 1) - 2.0 * at(yy, xx - 1) + 2.0 * at(yy, xx + 1) - at(yy + 1, xx - 1)
+        + at(yy + 1, xx + 1);
+    let gy = -at(yy - 1, xx - 1) - 2.0 * at(yy - 1, xx) - at(yy - 1, xx + 1) + at(yy + 1, xx - 1) + 2.0 * at(yy + 1, xx)
+        + at(yy + 1, xx + 1);
+    gx.abs() + gy.abs()
+}
+
+fn percentile60(vals: &mut [f32]) -> f32 {
+    let n = vals.len();
+    let pos = 0.60 * (n - 1) as f64;
+    let lo = pos.floor() as usize;
+    let hi = pos.ceil() as usize;
+    let frac = (pos - lo as f64) as f32;
+    let order = |a: &f32, b: &f32| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+    if lo == hi {
+        vals.select_nth_unstable_by(lo, order);
+        return vals[lo];
+    }
+    vals.select_nth_unstable_by(hi, order);
+    let hi_v = vals[hi];
+    let lo_v = vals[..hi].iter().copied().max_by(order).unwrap_or(hi_v);
+    lo_v * (1.0 - frac) + hi_v * frac
 }
 
 fn nearest_valid(valid: &[bool], w: usize, h: usize, x: f32, y: f32) -> bool {
@@ -624,49 +822,87 @@ fn nearest_valid(valid: &[bool], w: usize, h: usize, x: f32, y: f32) -> bool {
     valid[yy as usize * w + xx as usize]
 }
 
+fn distance_near_overlap(both: &[bool], w: usize, h: usize, y0: usize, x0: usize, y1: usize, x1: usize) -> Vec<f32> {
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut inside = vec![false; cw * ch];
+    for y in 0..ch {
+        let src = (y0 + y) * w + x0;
+        inside[y * cw..(y + 1) * cw].copy_from_slice(&both[src..src + cw]);
+    }
+    let local = outside_distance(&inside, cw, ch);
+    let mut dist = vec![1.0e6f32; w * h];
+    for y in 0..ch {
+        let dst = (y0 + y) * w + x0;
+        dist[dst..dst + cw].copy_from_slice(&local[y * cw..(y + 1) * cw]);
+    }
+    dist
+}
+
 fn improved(lum_a: &[f32], lum_b: &[f32], img: &[f32], both: &[bool], vb: &[bool], w: usize, h: usize) -> (bool, f32, f32) {
     let (wr, wg, wb) = super::const_::luma_weights();
-    let mut mag = vec![0f32; w * h];
-    let at = |yy: i32, xx: i32| lum_a[reflect101(yy, h as i32) as usize * w + reflect101(xx, w as i32) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let yy = y as i32;
-            let xx = x as i32;
-            let gx = -at(yy - 1, xx - 1) + at(yy - 1, xx + 1) - 2.0 * at(yy, xx - 1) + 2.0 * at(yy, xx + 1) - at(yy + 1, xx - 1)
-                + at(yy + 1, xx + 1);
-            let gy = -at(yy - 1, xx - 1) - 2.0 * at(yy - 1, xx) - at(yy - 1, xx + 1) + at(yy + 1, xx - 1) + 2.0 * at(yy + 1, xx)
-                + at(yy + 1, xx + 1);
-            mag[y * w + x] = gx.abs() + gy.abs();
+    let (by0, by1, bx0, bx1) = overlap_box(both, w, h);
+    if by1 <= by0 || bx1 <= bx0 {
+        return (false, 0.0, 0.0);
+    }
+    let margin = 24usize;
+    let y0 = by0.saturating_sub(margin);
+    let x0 = bx0.saturating_sub(margin);
+    let y1 = (by1 + margin).min(h);
+    let x1 = (bx1 + margin).min(w);
+    let cw = x1 - x0;
+    let ch = y1 - y0;
+    let mut mag = vec![0f32; cw * ch];
+    for y in 0..ch {
+        let fy = y0 + y;
+        for x in 0..cw {
+            let fx = x0 + x;
+            mag[y * cw + x] = if fy == 0 || fx == 0 || fy + 1 >= h || fx + 1 >= w {
+                sobel_mag(lum_a, w, h, fy, fx)
+            } else {
+                let up = (fy - 1) * w;
+                let mid = fy * w;
+                let down = (fy + 1) * w;
+                let xm = fx - 1;
+                let xp = fx + 1;
+                let gx = -lum_a[up + xm] + lum_a[up + xp] - 2.0 * lum_a[mid + xm] + 2.0 * lum_a[mid + xp] - lum_a[down + xm]
+                    + lum_a[down + xp];
+                let gy = -lum_a[up + xm] - 2.0 * lum_a[up + fx] - lum_a[up + xp] + lum_a[down + xm] + 2.0 * lum_a[down + fx]
+                    + lum_a[down + xp];
+                gx.abs() + gy.abs()
+            };
         }
     }
-    let mag = gauss_sigma(&mag, w, h, 2.0);
+    let mag = gauss_sigma(&mag, cw, ch, 2.0);
     let mut vals = Vec::new();
-    for i in 0..both.len() {
-        if both[i] {
-            vals.push(mag[i]);
+    for y in by0..by1 {
+        for x in bx0..bx1 {
+            let i = y * w + x;
+            if both[i] {
+                vals.push(mag[(y - y0) * cw + (x - x0)]);
+            }
         }
     }
     if vals.is_empty() {
         return (false, 0.0, 0.0);
     }
-    vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let pos = 0.60 * (vals.len() - 1) as f64;
-    let lo = pos.floor() as usize;
-    let hi = pos.ceil() as usize;
-    let frac = (pos - lo as f64) as f32;
-    let thr = vals[lo] * (1.0 - frac) + vals[hi] * frac;
+    let thr = percentile60(&mut vals);
     let mut d0 = 0.0f32;
     let mut d1 = 0.0f32;
     let mut n = 0.0f32;
-    for i in 0..both.len() {
-        if !(both[i] && vb[i] && mag[i] > thr) {
-            continue;
+    for y in by0..by1 {
+        for x in bx0..bx1 {
+            let i = y * w + x;
+            let g = mag[(y - y0) * cw + (x - x0)];
+            if !(both[i] && vb[i] && g > thr) {
+                continue;
+            }
+            let lb = wr * img[i * 3] + wg * img[i * 3 + 1] + wb * img[i * 3 + 2];
+            let ref_l = ((lum_a[i] + lum_b[i]) * 0.5).max(0.02);
+            d0 += (lum_a[i] - lum_b[i]).abs() / ref_l;
+            d1 += (lum_a[i] - lb).abs() / ref_l;
+            n += 1.0;
         }
-        let lb = wr * img[i * 3] + wg * img[i * 3 + 1] + wb * img[i * 3 + 2];
-        let ref_l = ((lum_a[i] + lum_b[i]) * 0.5).max(0.02);
-        d0 += (lum_a[i] - lum_b[i]).abs() / ref_l;
-        d1 += (lum_a[i] - lb).abs() / ref_l;
-        n += 1.0;
     }
     if n < 1.0 {
         return (false, 0.0, 0.0);
@@ -917,5 +1153,43 @@ fn fft(a: &mut [[f32; 2]], inverse: bool) {
             }
         }
         len <<= 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{percentile60, sobel_mag};
+
+    #[test]
+    fn percentile_matches_a_full_sort() {
+        let mut vals: Vec<f32> = (0..50).map(|i| ((i * 7) % 13) as f32).collect();
+        let mut sorted = vals.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let pos = 0.60 * (sorted.len() - 1) as f64;
+        let lo = pos.floor() as usize;
+        let hi = pos.ceil() as usize;
+        let frac = (pos - lo as f64) as f32;
+        let expect = sorted[lo] * (1.0 - frac) + sorted[hi] * frac;
+        let got = percentile60(&mut vals);
+        assert!((got - expect).abs() < 1e-5, "{got} {expect}");
+    }
+
+    #[test]
+    fn interior_gradient_matches_the_edge_formula() {
+        let w = 6usize;
+        let h = 5usize;
+        let lum: Vec<f32> = (0..w * h).map(|i| (i % 9) as f32 * 0.1).collect();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let slow = sobel_mag(&lum, w, h, y, x);
+                let up = &lum[(y - 1) * w..];
+                let mid = &lum[y * w..];
+                let down = &lum[(y + 1) * w..];
+                let gx = -up[x - 1] + up[x + 1] - 2.0 * mid[x - 1] + 2.0 * mid[x + 1] - down[x - 1] + down[x + 1];
+                let gy = -up[x - 1] - 2.0 * up[x] - up[x + 1] + down[x - 1] + 2.0 * down[x] + down[x + 1];
+                let fast = gx.abs() + gy.abs();
+                assert!((slow - fast).abs() < 1e-5);
+            }
+        }
     }
 }

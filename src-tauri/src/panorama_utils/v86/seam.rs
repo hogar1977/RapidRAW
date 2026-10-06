@@ -201,10 +201,7 @@ fn solve_grid(
                 if ids[p] < 0 || ids[q] < 0 {
                     continue;
                 }
-                let mut base = (d[p] + d[q]) * 0.5 / (1.0 + tex[p] + tex[q]) + (veto[p] + veto[q]) * 0.5 + 0.02;
-                if quiet[p] && quiet[q] {
-                    base = 0.02;
-                }
+                let base = seam_edge_cost(p, q, &d, &tex, &veto, &quiet);
                 let c = base + (bias[p] + bias[q]) * 0.5;
                 let ci = (c * scale).round().max(1.0) as i32;
                 edges.push((ids[p] as usize, ids[q] as usize, ci));
@@ -232,7 +229,7 @@ fn solve_grid(
     if src_n == 0 || snk_n == 0 {
         return None;
     }
-    let (seen, _) = min_cut(nodes + 2, &edges, src, snk);
+    let (seen, flow) = min_cut(nodes + 2, &edges, src, snk);
     let mut lab = vec![false; nh * nw];
     for i in 0..nh * nw {
         if ids[i] >= 0 {
@@ -253,18 +250,195 @@ fn solve_grid(
             }
         }
     }
+    // v47 integrity check: `term_a`/`term_b` OVERRIDE the min-cut labelling
+    // above. If those overrides move any node, the labelling we ship is no
+    // longer the optimum min_cut returned, and the seam is paying a cost the
+    // solver thought it had minimised. Recompute the energy actually shipped
+    // and compare against the flow min_cut reports (which equals the optimal
+    // cut cost in the same scaled units).
+    {
+        let mut shipped = 0i64;
+        for (dy, dx) in [(0isize, 1isize), (1, 0)] {
+            for y in 0..nh as isize - dy {
+                for x in 0..nw as isize - dx {
+                    let p = (y as usize) * nw + x as usize;
+                    let q = ((y + dy) as usize) * nw + (x + dx) as usize;
+                    if ids[p] < 0 || ids[q] < 0 || lab[p] == lab[q] {
+                        continue;
+                    }
+                    let base = seam_edge_cost(p, q, &d, &tex, &veto, &quiet);
+                    let c = base + (bias[p] + bias[q]) * 0.5;
+                    shipped += ((c * scale).round().max(1.0) as i64);
+                }
+            }
+        }
+        let opt = flow as i64;
+        let pct = if opt > 0 { 100.0 * (shipped - opt) as f64 / opt as f64 } else { 0.0 };
+        super::trace::line(&format!("cut_energy opt={opt} shipped={shipped} excess={pct:+.3}%"));
+    }
     Some((lab, nodes))
 }
 
-fn seam_fields(a: &[f32], b: &[f32], both: &[bool], w: usize, h: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+/// Per-pixel seam cost fields for an overlap: `d` (normalised disagreement
+/// between the two frames), `tex` (image texture) and `veto`.
+///
+/// Works at any resolution, not just the solver's sampling grid, so the v44
+/// diagnostic uses it on the full window to inspect the energy landscape the
+/// optimiser actually sees.
+/// Seam cost for one grid edge, from the fields at its two endpoints.
+///
+/// SINGLE DEFINITION, deliberately. The solver and the v47 integrity check both
+/// call this, so "energy the solver minimised" and "energy the shipped labelling
+/// carries" can never drift apart - which is the whole point of that check.
+///
+/// `LEAN_SEAM_NO_TEX_DIV` drops the `(1 + tex)` divisor, i.e. `base = d`. The
+/// divisor is INVERTED relative to visibility: it makes textured pixels CHEAP,
+/// so once box smoothing decouples d from texture, that divisor is what pulls
+/// the seam onto structure. Unset keeps the exact v42 form.
+fn seam_edge_cost(p: usize, q: usize, d: &[f32], tex: &[f32], veto: &[f32], quiet: &[bool]) -> f32 {
+    let mut base = if seam_no_tex_div() {
+        (d[p] + d[q]) * 0.5 + (veto[p] + veto[q]) * 0.5 + 0.02
+    } else {
+        (d[p] + d[q]) * 0.5 / (1.0 + tex[p] + tex[q]) + (veto[p] + veto[q]) * 0.5 + 0.02
+    };
+    if quiet[p] && quiet[q] {
+        base = 0.02;
+    }
+    base
+}
+
+/// v49 trial: drop the inverted `(1 + tex)` divisor from the seam cost.
+fn seam_no_tex_div() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LEAN_SEAM_NO_TEX_DIV").map(|v| v != "0").unwrap_or(false))
+}
+
+/// v48 trial: box radius, in grid samples, used to smooth the frames before
+/// differencing. Zero (the default) keeps the exact per-pixel measure.
+fn seam_diff_box() -> usize {
+    static R: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *R.get_or_init(|| std::env::var("LEAN_SEAM_DIFF_BOX").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0))
+}
+
+/// Separable running-sum box blur, O(n) regardless of radius. Reflects at the
+/// borders so the edges do not darken.
+fn box_blur(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let mut tmp = vec![0f32; w * h];
+    for y in 0..h {
+        let row = y * w;
+        let mut acc = 0f32;
+        for k in 0..=r {
+            let xx = if (k as isize - r as isize) < 0 { 0 } else { (k as isize + w as isize - r as isize) as usize % w };
+            acc += src[row + xx.min(w - 1)];
+        }
+        let inv = 1.0 / (2 * r + 1) as f32;
+        for x in 0..w {
+            tmp[row + x] = acc * inv;
+            let xin = x as isize + r as isize + 1;
+            let xout = x as isize - r as isize;
+            let xin_c = if xin < 0 { 0usize } else if xin as usize >= w { w - 1 } else { xin as usize };
+            let xout_c = if xout < 0 { 0usize } else { xout as usize % w };
+            acc += src[row + xin_c] - src[row + xout_c];
+        }
+    }
+    let mut out = vec![0f32; w * h];
+    for x in 0..w {
+        let mut acc = 0f32;
+        for k in 0..=r {
+            let yy = if (k as isize - r as isize) < 0 { 0 } else { (k as isize + h as isize - r as isize) as usize % h };
+            acc += tmp[yy * w + x];
+        }
+        let inv = 1.0 / (2 * r + 1) as f32;
+        for y in 0..h {
+            out[y * w + x] = acc * inv;
+            let yin = y as isize + r as isize + 1;
+            let yout = y as isize - r as isize;
+            let yin_c = if yin < 0 { 0usize } else if yin as usize >= h { h - 1 } else { yin as usize };
+            let yout_c = if yout < 0 { 0usize } else { yout as usize % h };
+            acc += tmp[yin_c * w + x] - tmp[yout_c * w + x];
+        }
+    }
+    out
+}
+
+/// v47 trial: percentile of the overlap's own texture distribution to use as
+/// the `quiet` threshold. `None` (the default) keeps the fixed constant.
+fn quiet_tex_percentile() -> Option<f64> {
+    static P: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    *P.get_or_init(|| {
+        std::env::var("LEAN_QUIET_TEX_PCT").ok().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0 && *v < 100.0)
+    })
+}
+
+/// v46 trial: which disagreement measure feeds the seam cost.
+#[derive(Clone, Copy, PartialEq)]
+enum SeamDiff {
+    Rel,
+    Abs,
+    Soft,
+}
+
+fn seam_diff_mode() -> SeamDiff {
+    static M: std::sync::OnceLock<SeamDiff> = std::sync::OnceLock::new();
+    *M.get_or_init(|| match std::env::var("LEAN_SEAM_DIFF").unwrap_or_default().to_ascii_lowercase().as_str() {
+        "abs" => SeamDiff::Abs,
+        "soft" => SeamDiff::Soft,
+        _ => SeamDiff::Rel,
+    })
+}
+
+pub fn seam_fields(a: &[f32], b: &[f32], both: &[bool], w: usize, h: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let n = w * h;
     let mut d = vec![0f32; n];
     let mut tex = vec![0f32; n];
     let mut veto = vec![0f32; n];
+    // v48 TRIAL: measure disagreement between BOX-SMOOTHED frames.
+    //
+    // Diagnosis so far: the graph cut is provably optimal (v47 integrity check,
+    // excess +0.000% on 54/54 solves), so the seam is the exact minimiser of
+    // our energy - which means the OBJECTIVE is wrong, not the solver. Our `d`
+    // is a per-pixel luma difference, and corr(d, tex) = +0.363: disagreement
+    // is entangled with structure by construction, so any seam that minimises
+    // `d` necessarily drifts onto texture (measured 1.30x median vs PTGui's
+    // 0.82x).
+    //
+    // Real parallax misalignment is spatially CORRELATED over several pixels;
+    // single-pixel texture is not. Averaging each frame over a small box before
+    // differencing cancels uncorrelated texture while preserving genuine
+    // misalignment. If the entanglement hypothesis is right, this should lower
+    // corr(d, tex) and let the seam find flat ground.
+    //
+    // Radius is in GRID samples, so radius 4 on the fine grid = 16 full-res px.
+    // `LEAN_SEAM_DIFF_BOX` unset (default) keeps the exact v42 per-pixel form.
+    let box_r = seam_diff_box();
+    let (aref, bref) = if box_r > 0 { (box_blur(a, w, h, box_r), box_blur(b, w, h, box_r)) } else { (a.to_vec(), b.to_vec()) };
     for y in 0..h {
         for x in 0..w {
             let i = y * w + x;
-            let diff = (a[i] - b[i]).abs() / ((a[i] + b[i]) * 0.5).max(0.02);
+            // v46 TRIAL: alternative disagreement measures.
+            //
+            // The default relative form divides by the local mean with a 0.02
+            // floor, which AMPLIFIES disagreement in dark regions: a small
+            // absolute error over a small mean becomes a large relative one.
+            // DSCF0566's seam sits at 1.55x median texture, and corr(d, tex) =
+            // +0.36, so a seam that routes by `d` inevitably lands on structure.
+            //
+            // If the relative normalisation is what ties `d` to structure, then
+            // an unnormalised (or gentler) measure should decouple them and let
+            // the seam find flat ground. That is what these variants test.
+            //   abs - plain absolute difference, no normalisation
+            //   soft - relative, but with the floor raised well above 0.02 so
+            //          dark pixels stop dominating
+            // Default `rel` keeps v42 behaviour untouched.
+            let diff = if box_r > 0 {
+                (aref[i] - bref[i]).abs() / ((aref[i] + bref[i]) * 0.5).max(0.02)
+            } else {
+                match seam_diff_mode() {
+                    SeamDiff::Abs => (a[i] - b[i]).abs(),
+                    SeamDiff::Soft => (a[i] - b[i]).abs() / ((a[i] + b[i]) * 0.5).max(0.25),
+                    SeamDiff::Rel => (a[i] - b[i]).abs() / ((a[i] + b[i]) * 0.5).max(0.02),
+                }
+            };
             let gx = if x > 0 {
                 (a[i] - a[i - 1]).abs() + (b[i] - b[i - 1]).abs()
             } else {
@@ -290,6 +464,38 @@ fn seam_fields(a: &[f32], b: &[f32], both: &[bool], w: usize, h: usize) -> (Vec<
 fn seam_steer(both: &[bool], xs: &[usize], ys: &[usize], tex: &[f32], d: &[f32], w: usize, h: usize) -> (Vec<f32>, Vec<bool>) {
     let mut bias = vec![0f32; w * h];
     let mut quiet = vec![false; w * h];
+    // v47 TRIAL: derive the texture threshold from THIS overlap's own texture
+    // distribution instead of the fixed QUIET_TEX constant.
+    //
+    // v46 measurement on DSCF0566: QUIET_TEX = 0.08 sits ABOVE the 99th
+    // percentile of the actual texture field (p99 = 0.061). `quiet` was
+    // therefore true for 90.9% of the overlap, and `base = 0.02` overwrote the
+    // entire cost - tex, d and veto alike - across nine tenths of the domain.
+    // The cost landscape was a plateau, not a gradient.
+    //
+    // A percentile is self-calibrating, which matters for image-agnosticism:
+    // 0566 (dusk cityscape), 4171 (near-black) and 9237 (night lights) have
+    // entirely different texture statistics, so no absolute constant can serve
+    // all three. `LEAN_QUIET_TEX_PCT` picks the percentile; unset keeps the
+    // original constant so every other version is unaffected.
+    let quiet_tex = match quiet_tex_percentile() {
+        Some(pct) => {
+            let mut live: Vec<f32> = (0..w * h).filter(|&i| both[i]).map(|i| tex[i]).collect();
+            if live.is_empty() {
+                QUIET_TEX
+            } else {
+                live.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let idx = (((live.len() - 1) as f64) * pct / 100.0).round() as usize;
+                let v = live[idx.min(live.len() - 1)];
+                super::trace::line(&format!(
+                    "quiet_tex percentile={pct:.1} -> {v:.5} (const={QUIET_TEX}, n={})",
+                    live.len()
+                ));
+                v
+            }
+        }
+        None => QUIET_TEX,
+    };
     if w < 2 || h < 2 {
         return (bias, quiet);
     }
@@ -322,7 +528,7 @@ fn seam_steer(both: &[bool], xs: &[usize], ys: &[usize], tex: &[f32], d: &[f32],
                 continue;
             }
             let rim = dist[i] * step < RIM_PX as f32;
-            let q = !rim && tex[i] < QUIET_TEX && d[i] < QUIET_D;
+            let q = !rim && tex[i] < quiet_tex && d[i] < QUIET_D;
             quiet[i] = q;
             if rim {
                 bias[i] = 40.0;

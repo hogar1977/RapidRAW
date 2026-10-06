@@ -58,6 +58,8 @@ pub fn match_all(feats: &[Vec<Feature>]) -> Vec<PairMatches> {
 
 fn match_pairs(feats: &[Vec<Feature>], pairs: &[(usize, usize)]) -> Vec<PairMatches> {
     let log = super::trace::current();
+    let packed: Vec<Vec<f32>> = feats.iter().map(|group| pack_desc(group)).collect();
+    let wide = avx2();
     pairs
         .par_iter()
         .map(|&(a, b)| {
@@ -65,46 +67,94 @@ fn match_pairs(feats: &[Vec<Feature>], pairs: &[(usize, usize)]) -> Vec<PairMatc
             if feats[a].len() < 6 || feats[b].len() < 6 || super::trace::halted() {
                 return PairMatches { a, b, pa: Vec::new(), pb: Vec::new() };
             }
-            let (pa, pb) = match_pair(&feats[a], &feats[b]);
+            let (pa, pb) = match_pair(&feats[a], &feats[b], &packed[a], &packed[b], wide);
             PairMatches { a, b, pa, pb }
         })
         .collect()
 }
 
-fn match_pair(a: &[Feature], b: &[Feature]) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
+fn pack_desc(group: &[Feature]) -> Vec<f32> {
+    let mut packed = vec![0f32; group.len() * 128];
+    for (i, feature) in group.iter().enumerate() {
+        packed[i * 128..(i + 1) * 128].copy_from_slice(&feature.desc);
+    }
+    packed
+}
+
+// Scans descriptors in blocks that fit in cache. The nearest point is the same one a full scan would pick.
+fn match_pair(a: &[Feature], b: &[Feature], packed_a: &[f32], packed_b: &[f32], wide: bool) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
     let ratio2 = LOWE_RATIO * LOWE_RATIO;
+    let na = a.len();
+    let nb = b.len();
+    let mut best = vec![f32::MAX; na];
+    let mut second = vec![f32::MAX; na];
+    let mut best_i = vec![0usize; na];
+    const BLOCK: usize = 256;
+    for b0 in (0..nb).step_by(BLOCK) {
+        if super::trace::halted() {
+            return (Vec::new(), Vec::new());
+        }
+        let b1 = (b0 + BLOCK).min(nb);
+        for ia in 0..na {
+            let ad = &packed_a[ia * 128..(ia + 1) * 128];
+            let mut be = best[ia];
+            let mut se = second[ia];
+            let mut bi = best_i[ia];
+            #[cfg(target_arch = "x86_64")]
+            if wide {
+                for ib in b0..b1 {
+                    let d = unsafe { dist2_wide(ad, packed_b.get_unchecked(ib * 128..ib * 128 + 128)) };
+                    if d < be {
+                        se = be;
+                        be = d;
+                        bi = ib;
+                    } else if d < se {
+                        se = d;
+                    }
+                }
+            }
+            #[cfg(not(target_arch = "x86_64"))]
+            let _ = wide;
+            if !wide {
+                for ib in b0..b1 {
+                    let d = dist2_scalar(ad, &packed_b[ib * 128..ib * 128 + 128]);
+                    if d < be {
+                        se = be;
+                        be = d;
+                        bi = ib;
+                    } else if d < se {
+                        se = d;
+                    }
+                }
+            }
+            best[ia] = be;
+            second[ia] = se;
+            best_i[ia] = bi;
+        }
+    }
     let mut pa = Vec::new();
     let mut pb = Vec::new();
-    for fa in a {
-        if super::trace::halted() {
-            break;
-        }
-        let mut best = f32::MAX;
-        let mut second = f32::MAX;
-        let mut best_i = 0usize;
-        for (i, fb) in b.iter().enumerate() {
-            let d = dist2(&fa.desc, &fb.desc);
-            if d < best {
-                second = best;
-                best = d;
-                best_i = i;
-            } else if d < second {
-                second = d;
-            }
-        }
-        if second < f32::MAX && best < ratio2 * second {
-            pa.push(fa.pt);
-            pb.push(b[best_i].pt);
+    for ia in 0..na {
+        if second[ia] < f32::MAX && best[ia] < ratio2 * second[ia] {
+            pa.push(a[ia].pt);
+            pb.push(b[best_i[ia]].pt);
         }
     }
     (pa, pb)
 }
 
-fn dist2(a: &[f32; 128], b: &[f32; 128]) -> f32 {
+fn avx2() -> bool {
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx2") {
-        return unsafe { dist2_wide(a, b) };
+    {
+        std::is_x86_feature_detected!("avx2")
     }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+fn dist2_scalar(a: &[f32], b: &[f32]) -> f32 {
     let mut s0 = 0f32;
     let mut s1 = 0f32;
     let mut s2 = 0f32;
@@ -126,7 +176,7 @@ fn dist2(a: &[f32; 128], b: &[f32; 128]) -> f32 {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn dist2_wide(a: &[f32; 128], b: &[f32; 128]) -> f32 {
+unsafe fn dist2_wide(a: &[f32], b: &[f32]) -> f32 {
     use std::arch::x86_64::{
         _mm256_add_ps, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_sub_ps,
         _mm_add_ps, _mm_cvtss_f32, _mm_hadd_ps,
@@ -144,4 +194,57 @@ unsafe fn dist2_wide(a: &[f32; 128], b: &[f32; 128]) -> f32 {
     let sum = _mm_hadd_ps(sum, sum);
     let sum = _mm_hadd_ps(sum, sum);
     _mm_cvtss_f32(sum)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::sift::Feature;
+    use super::{avx2, match_pair, pack_desc};
+
+    fn feature(seed: usize) -> Feature {
+        let mut desc = [0f32; 128];
+        for (k, value) in desc.iter_mut().enumerate() {
+            *value = ((seed * 17 + k * 3) % 19) as f32;
+        }
+        Feature { pt: [seed as f64, 1.0], desc }
+    }
+
+    fn direct(a: &[Feature], b: &[Feature]) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
+        let ratio2 = super::LOWE_RATIO * super::LOWE_RATIO;
+        let mut pa = Vec::new();
+        let mut pb = Vec::new();
+        for fa in a {
+            let mut best = f32::MAX;
+            let mut second = f32::MAX;
+            let mut best_i = 0usize;
+            for (i, fb) in b.iter().enumerate() {
+                let d = super::dist2_scalar(&fa.desc, &fb.desc);
+                if d < best {
+                    second = best;
+                    best = d;
+                    best_i = i;
+                } else if d < second {
+                    second = d;
+                }
+            }
+            if second < f32::MAX && best < ratio2 * second {
+                pa.push(fa.pt);
+                pb.push(b[best_i].pt);
+            }
+        }
+        (pa, pb)
+    }
+
+    #[test]
+    fn blocked_scan_matches_a_straight_scan() {
+        let a: Vec<Feature> = (0..80).map(feature).collect();
+        let mut b: Vec<Feature> = (80..200).map(feature).collect();
+        b[40].desc = a[7].desc;
+        let packed_a = pack_desc(&a);
+        let packed_b = pack_desc(&b);
+        let blocked = match_pair(&a, &b, &packed_a, &packed_b, avx2());
+        let straight = direct(&a, &b);
+        assert_eq!(blocked.0, straight.0);
+        assert_eq!(blocked.1, straight.1);
+    }
 }

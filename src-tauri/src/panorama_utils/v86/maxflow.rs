@@ -62,9 +62,6 @@ fn bfs(g: &[Vec<Edge>], src: usize, snk: usize, level: &mut [i32]) -> bool {
 }
 
 fn dfs(g: &mut [Vec<Edge>], u: usize, snk: usize, f: i32, level: &[i32], it: &mut [usize]) -> i32 {
-    if super::trace::halted() {
-        return 0;
-    }
     if u == snk {
         return f;
     }

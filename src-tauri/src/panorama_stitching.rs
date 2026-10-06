@@ -3,8 +3,8 @@ use crate::app_state::AppState;
 use crate::file_management::parse_virtual_path;
 use crate::formats::is_raw_file;
 use crate::image_processing::{apply_linear_to_srgb, apply_srgb_to_linear};
-use crate::lens_correction::{find_best_lens_match, resolve_lens_params, CalibrationElement, LensDatabase};
-use crate::panorama_utils::camera::parse_focal_mm_35eq;
+use crate::lens_correction::{self, find_best_lens_match, resolve_lens_params, CalibrationElement, LensDatabase, MultiName};
+use crate::panorama_utils::camera::{focal_mm_native, parse_focal_mm_35eq};
 use crate::panorama_utils::overlay::generate_overlay;
 use crate::panorama_utils::ram::stitch_memory_budget_bytes;
 use crate::panorama_utils::session::{drop_session, DroppedImage, NormalizedCrop, PanoramaSession, WorkingFrame};
@@ -17,6 +17,7 @@ use crate::panorama_utils::v86::stitch::{self, InputFrame, StitchResult};
 use crate::panorama_utils::v86::trace::{self, StitchLog};
 use base64::{engine::general_purpose, Engine as _};
 use image::{DynamicImage, ImageFormat, Rgb32FImage};
+use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -377,29 +378,43 @@ fn run_stitch(
         let _ = app.emit("panorama-progress", "Using half size so the stitch fits in memory.");
     }
     let settings = load_settings(app.clone()).unwrap_or_default();
-    let mut frames = Vec::new();
-    let mut gains_ev = Vec::new();
+    let log = trace::current();
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().map_err(|e| format!("Could not start the loader: {e}"))?;
+    let loaded: Result<Vec<(InputFrame, Option<f64>, HashMap<String, String>)>, String> = pool.install(|| {
+        source_paths
+            .par_iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let _guard = log.clone().map(trace::install);
+                trace::gate()?;
+                let name = file_name(path);
+                let _ = app.emit("panorama-progress", format!("Loading {}/{}: {}", i + 1, source_paths.len(), name));
+                let (rgb, fw, fh, exif) = load_linear(path, &settings)?;
+                let gain = exposure_value(&exif);
+                let (rgb, fw, fh) = if half {
+                    let img = Rgb32FImage::from_raw(fw, fh, rgb).ok_or_else(|| "Could not read pixels.".to_string())?;
+                    let sw = (fw / 2).max(1);
+                    let sh = (fh / 2).max(1);
+                    let small = image::imageops::resize(&img, sw, sh, image::imageops::FilterType::Triangle);
+                    (small.into_raw(), sw, sh)
+                } else {
+                    (rgb, fw, fh)
+                };
+                trace::line(&format!("loaded {}/{} {name} {fw}x{fh} half={half}", i + 1, source_paths.len()));
+                Ok((InputFrame { name, width: fw, height: fh, rgb }, gain, exif))
+            })
+            .collect()
+    });
+    let loaded = loaded?;
+    let mut frames = Vec::with_capacity(loaded.len());
+    let mut gains_ev = Vec::with_capacity(loaded.len());
     let mut exif0 = HashMap::new();
-    for (i, path) in source_paths.iter().enumerate() {
-        trace::gate()?;
-        let name = file_name(path);
-        let _ = app.emit("panorama-progress", format!("Loading {}/{}: {}", i + 1, source_paths.len(), name));
-        let (rgb, fw, fh, exif) = load_linear(path, &settings)?;
+    for (i, (frame, gain, exif)) in loaded.into_iter().enumerate() {
         if i == 0 {
-            exif0 = exif.clone();
+            exif0 = exif;
         }
-        gains_ev.push(exposure_value(&exif));
-        let (rgb, fw, fh) = if half {
-            let img = Rgb32FImage::from_raw(fw, fh, rgb).ok_or_else(|| "Could not read pixels.".to_string())?;
-            let sw = (fw / 2).max(1);
-            let sh = (fh / 2).max(1);
-            let small = image::imageops::resize(&img, sw, sh, image::imageops::FilterType::Triangle);
-            (small.into_raw(), sw, sh)
-        } else {
-            (rgb, fw, fh)
-        };
-        frames.push(InputFrame { name: name.clone(), width: fw, height: fh, rgb });
-        trace::line(&format!("loaded {}/{} {name} {fw}x{fh} half={half}", i + 1, source_paths.len()));
+        gains_ev.push(gain);
+        frames.push(frame);
     }
     apply_exposure(&mut frames, &gains_ev);
     let (mut lens, calib, crops) = build_lens(lens_db.as_deref(), &exif0, crop_factor, estimate);
@@ -685,8 +700,27 @@ fn lens_crop(db: &LensDatabase, maker: &str, model: &str) -> Option<f64> {
     lenses.iter().find(|l| l.get_display_name(&lenses) == model).and_then(|l| l.cropfactor).map(|v| v as f64)
 }
 
+/// Crop factor for the EXIF camera, from the lensfun **camera** entry.
+///
+/// Matches against *every* name variant rather than the single one
+/// `get_maker`/`get_model` return. Those prefer the `lang="en"` variant, which
+/// is a trap: lensfun records the Pentax KP as
+/// `<maker>Ricoh Imaging Company, Ltd.</maker><maker lang="en">Pentax</maker>`
+/// with model "Pentax KP" / "KP", while the camera writes
+/// `RICOH IMAGING COMPANY, LTD.` / `PENTAX KP`. Comparing only the preferred
+/// pair finds nothing, and a miss here is not benign - it silently falls back to
+/// crop 1.0, a 53% focal error on APS-C.
 fn camera_crop(db: &LensDatabase, maker: &str, model: &str) -> Option<f64> {
-    db.cameras.iter().find(|c| c.get_maker().eq_ignore_ascii_case(maker) && c.get_model().eq_ignore_ascii_case(model)).map(|c| c.cropfactor as f64)
+    db.cameras
+        .iter()
+        .find(|c| camera_name_matches(&c.maker, maker) && camera_name_matches(&c.model, model))
+        .map(|c| c.cropfactor as f64)
+}
+
+/// True when any of a lensfun entry's name variants equals `needle`, ignoring
+/// case and surrounding whitespace.
+fn camera_name_matches(names: &[MultiName], needle: &str) -> bool {
+    !needle.trim().is_empty() && lens_correction::any_name_matches(names, needle)
 }
 
 fn vig_at_longest_distance(db: &LensDatabase, maker: &str, model: &str, focal: f32) -> Option<(f64, f64, f64)> {
@@ -797,6 +831,166 @@ fn first_number(s: &str) -> Option<f64> {
         }
     }
     num.parse().ok()
+}
+
+pub struct DevelopedFrame {
+    pub name: String,
+    pub rgb: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+    pub exif: HashMap<String, String>,
+    pub exposure_ev: Option<f64>,
+}
+
+pub struct PanoramaLensSetup {
+    pub lens: LensModel,
+    pub focal35: f64,
+    pub crop_factor: f64,
+    pub calib: f64,
+}
+
+// Develops one file and reads its lens the same way the panorama stitcher does.
+pub fn source_orientation(path: &str) -> Result<u16, String> {
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read {}: {e}", file_name(path)))?;
+    Ok(orientation_of_bytes(&bytes))
+}
+
+pub fn orientation_of_bytes(file_bytes: &[u8]) -> u16 {
+    match crate::raw_processing::raw_orientation(file_bytes) {
+        rawler::decoders::Orientation::HorizontalFlip => 2,
+        rawler::decoders::Orientation::Rotate180 => 3,
+        rawler::decoders::Orientation::VerticalFlip => 4,
+        rawler::decoders::Orientation::Transpose => 5,
+        rawler::decoders::Orientation::Rotate90 => 6,
+        rawler::decoders::Orientation::Transverse => 7,
+        rawler::decoders::Orientation::Rotate270 => 8,
+        _ => 1,
+    }
+}
+
+pub fn exif_of(path: &str) -> Result<HashMap<String, String>, String> {
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read {}: {e}", file_name(path)))?;
+    Ok(crate::exif_processing::read_exif_data_from_bytes(path, &bytes))
+}
+
+pub fn develop_panorama_frame(path: &str) -> Result<DevelopedFrame, String> {
+    let settings = user_settings();
+    let (rgb, width, height, exif) = load_linear(path, &settings)?;
+    let exposure_ev = exposure_value(&exif);
+    Ok(DevelopedFrame { name: file_name(path), rgb, width, height, exif, exposure_ev })
+}
+
+pub fn panorama_lens_setup(db_dir: &Path, exif: &HashMap<String, String>) -> PanoramaLensSetup {
+    let db = crate::lens_correction::load_lensfun_db_from_dir(db_dir);
+    let maker = exif.get("Make").map(|s| s.as_str()).unwrap_or("");
+    let model = exif.get("LensModel").map(|s| s.as_str()).unwrap_or("");
+    let camera = exif.get("Model").map(|s| s.as_str()).unwrap_or("");
+    let (_, _, crop, _) = lens_summary(Some(&db), maker, model, camera);
+    let crop = if crop > 0.0 { crop } else { 1.0 };
+    let (lens, calib, _) = build_lens(Some(&db), exif, crop, false);
+    let focal35 = panorama_focal_mm_35eq(exif, crop);
+    PanoramaLensSetup { lens, focal35, crop_factor: crop, calib }
+}
+
+/// 35mm-equivalent focal length for panorama geometry, computed from the true
+/// focal length and the crop factor, rather than read from EXIF.
+///
+/// Why: `FocalLengthIn35mmFilm` is an EXIF `Short` - whole millimetres - and
+/// the maker computes it with the marketed crop convention ("1.5x" for both the
+/// Fujifilm X-T5 and the Pentax KP), not the geometric one. Neither camera
+/// reports a crop factor or sensor dimensions at all, so the 35mm-equivalent tag
+/// is the only crop-ish signal EXIF offers, and it is doubly lossy: rounded to
+/// 1 mm *and* derived from a marketing constant. On DSCF0566 it reads 105 where
+/// the exact value is 70.2 * 1.53392 = 107.68.
+///
+/// Here the crop comes from the lensfun **camera** entry for the EXIF
+/// Make+Model, which is the geometric crop factor and so needs no manufacturer
+/// special-casing - the lens entry is irrelevant, which is why an unrecognised
+/// lens (the Pentax KP's 100mm macro) does not affect this. The multiplication
+/// is ours, so the result is precise to the 0.1 mm EXIF actually provides.
+///
+/// `FocalLengthIn35mmFilm` is logged only as a cross-check, never used as a
+/// value. Falls back to it when `FocalLength` is missing or implausible.
+///
+/// Prototype-scope: the degraded paths (no EXIF focal at all, JPEG input, a
+/// camera missing from the lensfun database) are not yet hardened here.
+fn panorama_focal_mm_35eq(exif: &HashMap<String, String>, crop: f64) -> f64 {
+    let exif_f35 = parse_focal_mm_35eq(exif);
+    // v51: default back to the EXIF 35mm-equivalent focal. The computed
+// native*lensfun-crop value was introduced after the app's known-good DSCF0566
+// render (2026-09-28, focal35=105.0) and moved it to 107.7, a ~2.6% projection
+// error. Set LEAN_PRECISE_FOCAL=1 to opt back into the computed value.
+let precise = std::env::var("LEAN_PRECISE_FOCAL").map(|v| v != "0").unwrap_or(false);
+    match focal_mm_native(exif) {
+        Some(native) if precise && crop > 0.0 && crop.is_finite() => {
+            let computed = native * crop;
+            trace::line(&format!(
+                "focal native={native:.1}mm x crop={crop:.3} = {computed:.2}mm 35eq \
+                 (exif 35eq={exif_f35:.1}, implied crop={:.4}, delta={:+.2}%)",
+                exif_f35 / native,
+                100.0 * (computed / exif_f35 - 1.0)
+            ));
+            computed
+        }
+        _ => {
+            trace::line(&format!(
+                "focal native unavailable or disabled, using exif 35eq={exif_f35:.1}mm (crop={crop:.3})"
+            ));
+            exif_f35
+        }
+    }
+}
+
+pub fn exposure_gains(evs: &[Option<f64>]) -> Vec<f32> {
+    let mut known: Vec<f64> = evs.iter().filter_map(|v| *v).filter(|v| *v > 0.0).collect();
+    if known.is_empty() {
+        return vec![1.0; evs.len()];
+    }
+    known.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let ref_ev = known[known.len() / 2];
+    evs.iter()
+        .map(|ev| match ev.filter(|v| *v > 0.0) {
+            Some(ev) => (ref_ev / ev) as f32,
+            None => 1.0,
+        })
+        .collect()
+}
+
+pub fn oriented_embedded_jpeg(path: &str) -> Result<(Vec<u8>, u32, u32), String> {
+    let bytes = fs::read(path).map_err(|e| format!("Failed to read {}: {e}", file_name(path)))?;
+    let image = fuji_embedded_jpeg(&bytes)
+        .and_then(|jpeg| image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg).ok())
+        .or_else(|| crate::image_loader::largest_tiff_jpeg_preview(&bytes))
+        .ok_or_else(|| format!("No embedded preview in {}", file_name(path)))?;
+    let oriented = crate::image_processing::apply_orientation(image, crate::raw_processing::raw_orientation(&bytes));
+    let rgb = oriented.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    Ok((rgb.into_raw(), w, h))
+}
+
+pub fn write_panorama_tiff(rgb: &[f32], width: u32, height: u32, path: &Path) -> Result<(), String> {
+    let img = Rgb32FImage::from_raw(width, height, rgb.to_vec()).ok_or_else(|| "Could not build the panorama.".to_string())?;
+    let display = apply_linear_to_srgb(DynamicImage::ImageRgb32F(img));
+    display.to_rgb16().save_with_format(path, ImageFormat::Tiff).map_err(|e| format!("Failed to save panorama: {e}"))
+}
+
+fn user_settings() -> crate::app_settings::AppSettings {
+    let path = std::env::var("RAPIDRAW_SETTINGS").map(PathBuf::from).unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        PathBuf::from(home).join(".local/share/io.github.CyberTimon.RapidRAW/settings.json")
+    });
+    fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+}
+
+fn fuji_embedded_jpeg(file_bytes: &[u8]) -> Option<&[u8]> {
+    const MAGIC: &[u8] = b"FUJIFILMCCD-RAW ";
+    if file_bytes.len() < 0x5c || !file_bytes.starts_with(MAGIC) {
+        return None;
+    }
+    let offset = u32::from_be_bytes(file_bytes[0x54..0x58].try_into().ok()?) as usize;
+    let length = u32::from_be_bytes(file_bytes[0x58..0x5c].try_into().ok()?) as usize;
+    let jpeg = file_bytes.get(offset..offset.checked_add(length)?)?;
+    if jpeg.starts_with(&[0xFF, 0xD8]) { Some(jpeg) } else { None }
 }
 
 fn parse_shutter(s: &str) -> Option<f64> {
