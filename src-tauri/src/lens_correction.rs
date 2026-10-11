@@ -551,7 +551,10 @@ fn lenses_for_maker<'a>(db: &'a LensDatabase, maker: &str) -> Vec<&'a Lens> {
 }
 
 pub(crate) fn load_lensfun_db_from_dir(resource_path: &std::path::Path) -> LensDatabase {
-    let mut combined_db = LensDatabase { cameras: Vec::new(), lenses: Vec::new() };
+    let mut combined_db = LensDatabase {
+        cameras: Vec::new(),
+        lenses: Vec::new(),
+    };
     if !resource_path.exists() {
         log::error!("Lensfun DB directory not found at: {:?}", resource_path);
         return combined_db;

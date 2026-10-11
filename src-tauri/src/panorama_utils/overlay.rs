@@ -5,18 +5,13 @@ pub struct OverlayResult {
     pub winner_map_png: Vec<u8>,
 }
 
-pub fn generate_overlay(
-    winners: &[u16],
-    width: u32,
-    height: u32,
-) -> Result<OverlayResult, String> {
+// Draws the seam lines on the preview.
+pub fn generate_overlay(winners: &[u16], width: u32, height: u32) -> Result<OverlayResult, String> {
     let w = width as usize;
     let h = height as usize;
     assert_eq!(winners.len(), w * h);
-
     let mut boundary = RgbaImage::new(width, height);
     let mut map = GrayImage::new(width, height);
-
     for y in 0..h {
         for x in 0..w {
             let id = winners[y * w + x];
@@ -26,7 +21,6 @@ pub fn generate_overlay(
                 ((id % 255) as u8).saturating_add(1)
             };
             map.put_pixel(x as u32, y as u32, image::Luma([luma]));
-
             if id == u16::MAX {
                 continue;
             }
@@ -45,7 +39,6 @@ pub fn generate_overlay(
             }
         }
     }
-
     Ok(OverlayResult {
         boundary_png: encode_png_rgba(&boundary)?,
         winner_map_png: encode_png_gray(&map)?,
@@ -64,22 +57,4 @@ fn encode_png_gray(img: &GrayImage) -> Result<Vec<u8>, String> {
     img.write_to(&mut buf, image::ImageFormat::Png)
         .map_err(|e| format!("Failed to encode winner map: {}", e))?;
     Ok(buf.into_inner())
-}
-
-pub fn lookup_winner(
-    winners: &[u16],
-    width: u32,
-    height: u32,
-    x: u32,
-    y: u32,
-) -> Option<u16> {
-    if x >= width || y >= height {
-        return None;
-    }
-    let id = winners[(y as usize) * (width as usize) + (x as usize)];
-    if id == u16::MAX {
-        None
-    } else {
-        Some(id)
-    }
 }

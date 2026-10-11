@@ -260,11 +260,31 @@ export function useTauriListeners({
         if (isEffectActive) {
           const percent = typeof event.payload?.percent === 'number' ? event.payload.percent : 0;
           const message = typeof event.payload?.message === 'string' ? event.payload.message : null;
+          const rawNote = event.payload?.note ?? null;
+          // The backend sends either prose or `{code, ...}`, so the user sees their own language.
+          const codeNote =
+            rawNote && typeof rawNote === 'object' ? (rawNote as Record<string, unknown>) : null;
+          const note = typeof rawNote === 'string' ? rawNote : null;
           useUIStore.getState().setUI((state) => ({
             panoramaModalState: {
               ...state.panoramaModalState,
               saveProgressPercent: Math.max(0, Math.min(100, percent)),
               saveProgressMessage: message,
+              // Sticky: once the backend has explained how the image was rendered, that stays put
+              // while the later progress messages scroll past it.
+              saveNote: note ?? state.panoramaModalState.saveNote,
+              saveNoteCode: codeNote
+                ? (codeNote as unknown as { code: string; percent?: number; next?: number })
+                : state.panoramaModalState.saveNoteCode,
+              savedQuality:
+                typeof event.payload.savedQuality === 'number'
+                  ? event.payload.savedQuality
+                  : state.panoramaModalState.savedQuality,
+              savedAttempts:
+                typeof event.payload.savedAttempts === 'number'
+                  ? event.payload.savedAttempts
+                  : state.panoramaModalState.savedAttempts,
+              saveReduced: event.payload.reduced ?? state.panoramaModalState.saveReduced,
             },
           }));
         }
@@ -287,6 +307,8 @@ export function useTauriListeners({
               previewWidth: event.payload.previewWidth ?? 0,
               previewHeight: event.payload.previewHeight ?? 0,
               filenames: event.payload.filenames ?? [],
+              frames: event.payload.frames ?? null,
+
               isProcessing: false,
               progressMessage: null,
               saveProgressPercent: null,

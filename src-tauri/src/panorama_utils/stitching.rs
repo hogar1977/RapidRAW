@@ -2,7 +2,6 @@ use image::{Rgb, Rgb32FImage};
 use nalgebra::{Matrix3, Point3};
 use rayon::prelude::*;
 
-// CYBERTIMON: required by hdr_deghosting; do not remove until HDR is migrated.
 pub fn warp_image_homography(
     source: &Rgb32FImage,
     homography: &Matrix3<f64>,

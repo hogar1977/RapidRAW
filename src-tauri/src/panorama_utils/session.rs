@@ -1,6 +1,5 @@
-use crate::panorama_utils::v86::geom::Projection;
-use crate::panorama_utils::v86::lens::LensModel;
-use nalgebra::Matrix3;
+use crate::panorama_utils::stitch::project::Projection;
+use crate::panorama_utils::stitch::{FrameMeta, PanoOptions, Registration};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -18,17 +17,38 @@ pub struct NormalizedCrop {
     pub height: f64,
 }
 
+impl NormalizedCrop {
+    pub fn copy(&self) -> Self {
+        Self {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
 impl Default for NormalizedCrop {
     fn default() -> Self {
-        Self { x: 0.0, y: 0.0, width: 1.0, height: 1.0 }
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+        }
     }
 }
 
 pub struct WorkingFrame {
     pub name: String,
-    pub width: u32,
-    pub height: u32,
+    pub width: usize,
+    pub height: usize,
+    pub native_width: usize,
+    pub native_height: usize,
     pub rgb: Vec<f32>,
+    pub clip: f32,
+    pub exposure: Option<f64>,
+    pub focal35: Option<f64>,
 }
 
 pub struct PanoramaSession {
@@ -42,6 +62,8 @@ pub struct PanoramaSession {
     pub recommended_projection: Projection,
     pub selected_projection: Projection,
     pub crop: NormalizedCrop,
+    pub crop_edited: bool,
+    pub registration: Registration,
     pub preview_width: u32,
     pub preview_height: u32,
     pub temp_dir: Option<PathBuf>,
@@ -49,14 +71,12 @@ pub struct PanoramaSession {
     pub composite_width: u32,
     pub composite_height: u32,
     pub frames: Vec<WorkingFrame>,
-    pub rotations: Vec<Matrix3<f64>>,
-    pub focal_px: f64,
-    pub focal35: f64,
-    pub lens: LensModel,
-    pub gains: Vec<f64>,
-    pub coef: Vec<f64>,
-    pub pedestal: f64,
+    pub meta: std::collections::HashMap<String, FrameMeta>,
+    pub focal_outliers: std::collections::HashMap<String, bool>,
+    pub options: PanoOptions,
     pub half: bool,
+    pub preview_scale: f64,
+    pub quality: f64,
     pub log_origin: std::time::Instant,
 }
 

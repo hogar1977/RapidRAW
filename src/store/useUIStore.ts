@@ -61,6 +61,35 @@ interface PanoramaModalState {
   filenames: Array<string>;
   saveProgressPercent: number | null;
   saveProgressMessage: string | null;
+  /** Persistent explanation of how the image was rendered, or null. */
+  saveNote: string | null;
+  /** Structured form of `saveNote` when the backend sends a code rather than prose. */
+  saveNoteCode: { code: string; percent?: number; next?: number } | null;
+  /** Fraction of native resolution to save, 0.25 to 1. */
+  quality: number;
+  /** Set once a save finishes: how it went, so the modal can colour the outcome. */
+  savedQuality: number | null;
+  savedAttempts: number | null;
+  /** True when the save needed retries or produced less than the requested quality. */
+  saveReduced: boolean;
+  /** Per source photo, indexed by frame index (the order the winner map uses). */
+  frames: Array<PanoramaFrameInfo> | null;
+  /** Human-readable RAM summary for the preview. */
+  /** Set when RAM forced the output below full resolution. */
+}
+
+interface PanoramaFrameInfo {
+  name: string;
+  focal35?: number | null;
+  meta: {
+    nativeMm?: number | null;
+    focal35?: number | null;
+    shutter?: string | null;
+    aperture?: number | null;
+    iso?: number | null;
+  } | null;
+  focalOutlier: boolean;
+  dropped: boolean;
 }
 
 interface FocusStackModalState {
@@ -367,6 +396,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     stitchingSourcePaths: [],
     overlayBase64: null,
     winnerMapBase64: null,
+    frames: null,
     dropped: [],
     recommendedProjection: null,
     selectedProjection: null,
@@ -376,6 +406,12 @@ export const useUIStore = create<UIState>((set, get) => ({
     filenames: [],
     saveProgressPercent: null,
     saveProgressMessage: null,
+    saveNote: null,
+    saveNoteCode: null,
+    quality: 1,
+    savedQuality: null,
+    savedAttempts: null,
+    saveReduced: false,
   },
   focusStackModalState: {
     error: null,

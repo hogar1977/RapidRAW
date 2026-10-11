@@ -2305,7 +2305,6 @@ pub fn run() {
             focus_stacking::save_focus_stack,
             image_loader::load_image,
             image_loader::is_image_cached,
-            panorama_stitching::probe_panorama_lenses,
             panorama_stitching::stitch_panorama,
             panorama_stitching::reproject_panorama,
             panorama_stitching::cancel_panorama,

@@ -160,18 +160,15 @@ export default function AppModals(props: AppModalsProps) {
         dropped={panoramaModalState.dropped}
         error={panoramaModalState.error}
         filenames={panoramaModalState.filenames}
+        frames={panoramaModalState.frames ?? null}
         finalImageBase64={panoramaModalState.finalImageBase64}
         imageCount={panoramaModalState.stitchingSourcePaths.length}
         sourcePaths={panoramaModalState.stitchingSourcePaths}
         isOpen={panoramaModalState.isOpen}
         isProcessing={panoramaModalState.isProcessing}
-        loadingImageUrl={
-          panoramaModalState.stitchingSourcePaths.length > 0
-            ? thumbnails[
-                panoramaModalState.stitchingSourcePaths[Math.floor(panoramaModalState.stitchingSourcePaths.length / 2)]
-              ] || null
-            : null
-        }
+        loadingImageUrls={panoramaModalState.stitchingSourcePaths
+          .map((path) => thumbnails[path])
+          .filter((url): url is string => Boolean(url))}
         onClose={() => {
           props.handleCancelPanorama();
           setUI({
@@ -184,6 +181,7 @@ export default function AppModals(props: AppModalsProps) {
               stitchingSourcePaths: [],
               overlayBase64: null,
               winnerMapBase64: null,
+              frames: null,
               dropped: [],
               recommendedProjection: null,
               selectedProjection: null,
@@ -193,6 +191,12 @@ export default function AppModals(props: AppModalsProps) {
               filenames: [],
               saveProgressPercent: null,
               saveProgressMessage: null,
+              saveNote: null,
+              saveNoteCode: null,
+              quality: 1,
+              savedQuality: null,
+              savedAttempts: null,
+              saveReduced: false,
             },
           });
         }}
@@ -206,6 +210,13 @@ export default function AppModals(props: AppModalsProps) {
         progressMessage={panoramaModalState.progressMessage}
         recommendedProjection={panoramaModalState.recommendedProjection}
         saveProgressMessage={panoramaModalState.saveProgressMessage}
+        saveNote={panoramaModalState.saveNote}
+        saveNoteCode={panoramaModalState.saveNoteCode}
+        quality={panoramaModalState.quality}
+        onQualityChange={(v) => setUI((st) => ({ panoramaModalState: { ...st.panoramaModalState, quality: v } }))}
+        savedQuality={panoramaModalState.savedQuality}
+        savedAttempts={panoramaModalState.savedAttempts}
+        saveReduced={panoramaModalState.saveReduced}
         saveProgressPercent={panoramaModalState.saveProgressPercent}
         selectedProjection={panoramaModalState.selectedProjection}
         winnerMapBase64={panoramaModalState.winnerMapBase64}

@@ -506,10 +506,10 @@ fn scan_exif_focal_length_in_35mm(file_bytes: &[u8]) -> Option<f64> {
     // Some TIFF-based RAWs store EXIF without an Exif APP1 header.
     if file_bytes.len() >= 8 {
         let be = &file_bytes[0..2];
-        if be == b"II" || be == b"MM" {
-            if let Some(v) = read_tiff_tag_a405(file_bytes, 0) {
-                return Some(v);
-            }
+        if (be == b"II" || be == b"MM")
+            && let Some(v) = read_tiff_tag_a405(file_bytes, 0)
+        {
+            return Some(v);
         }
     }
     None
@@ -1884,7 +1884,9 @@ pub fn write_rrexif_sidecar(source_path_str: &str, target_image_path: &Path) -> 
 #[cfg(test)]
 mod focal_exif_tests {
     use super::*;
-    use crate::panorama_utils::camera::{focal_px_from_fov, fov_rad_from_focal_mm_35eq, parse_focal_mm_35eq};
+    use crate::panorama_utils::camera::{
+        focal_px_from_fov, fov_rad_from_focal_mm_35eq, parse_focal_mm_35eq,
+    };
 
     #[test]
     fn fuji_raf_header_points_at_jpeg_preview() {

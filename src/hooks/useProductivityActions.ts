@@ -82,6 +82,7 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
         const savedPath: string = await invoke(Invokes.SavePanorama, {
           firstPathStr: panoramaModalState.stitchingSourcePaths[0],
           crop: crop ?? panoramaModalState.crop,
+          quality: panoramaModalState.quality,
         });
         await refreshImageList();
         setUI((state) => ({
